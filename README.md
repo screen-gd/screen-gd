@@ -1,16 +1,24 @@
-## Hi there 👋
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/profile-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./assets/profile-light.svg">
+  <img alt="Screen — product design and software" src="./assets/profile-light.svg" width="100%">
+</picture>
 
-<!--
-**screen-gd/screen-gd** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
+I design and build focused software for people who care how their tools feel.
+Solo product designer and developer working across web and desktop from Sharjah.
 
-Here are some ideas to get you started:
+[Portfolio ↗](https://znsnexus.com) &nbsp;&middot;&nbsp; [Elsewhere ↗](https://zaid.us.ci)
 
-- 🔭 I’m currently working on ...
-- 🌱 I’m currently learning ...
-- 👯 I’m looking to collaborate on ...
-- 🤔 I’m looking for help with ...
-- 💬 Ask me about ...
-- 📫 How to reach me: ...
-- 😄 Pronouns: ...
-- ⚡ Fun fact: ...
--->
+### Selected work
+
+**[Col](https://github.com/screen-gd/Col)** — A curated place to discover, compare, and understand modern UI libraries.
+
+**[Closure](https://github.com/screen-gd/Closure)** — Private, self-hosted feedback, changelog, and roadmap software.
+
+**[Typo](https://github.com/screen-gd/Typo)** — A cross-platform autocorrect tool designed to stay out of the way.
+
+### Current focus
+
+Thoughtful interfaces, useful automation, and smaller products with sharper ideas.
+
+<sub>TypeScript &middot; Next.js &middot; Electron &middot; Rust</sub>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="title description">
+  <title id="title">Screen</title>
+  <desc id="description">Product design and software, Sharjah.</desc>
+  <rect width="1200" height="300" fill="#000000"/>
+  <rect x="72" y="56" width="12" height="12" fill="#2f7df4"/>
+  <path d="M72 236H1128" stroke="#2a2a2a"/>
+  <text x="72" y="190" fill="#f7f7f4" font-family="Arial, Helvetica, sans-serif" font-size="112" font-weight="700" letter-spacing="-5">SCREEN</text>
+  <text x="1128" y="82" fill="#a3a3a3" font-family="Arial, Helvetica, sans-serif" font-size="15" text-anchor="end" letter-spacing="2">PRODUCT DESIGN × SOFTWARE</text>
+  <text x="72" y="265" fill="#777777" font-family="Arial, Helvetica, sans-serif" font-size="13" letter-spacing="2">SHARJAH, UAE</text>
+  <text x="1128" y="265" fill="#777777" font-family="Arial, Helvetica, sans-serif" font-size="13" text-anchor="end" letter-spacing="2">DESIGNING WHAT I WANT TO USE</text>
+</svg>
