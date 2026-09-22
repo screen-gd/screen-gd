@@ -16,7 +16,7 @@ Solo product designer and developer working across web and desktop from Sharjah.
 A curated place to discover and compare modern UI libraries.
 
 <a href="https://github.com/screen-gd/Col">
-  <img src="./assets/work-col.png" alt="Col UI library directory homepage" width="100%">
+  <img src="./assets/work-col-clean.png" alt="Col UI library directory homepage" width="100%">
 </a>
 
 ### [Linkr ↗](https://linkrr-jet.vercel.app)
