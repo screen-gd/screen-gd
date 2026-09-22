@@ -1,7 +1,7 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./assets/profile-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="./assets/profile-light.svg">
-  <img alt="Screen — product design and software" src="./assets/profile-light.svg" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/profile-dark-v2.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./assets/profile-light-v2.svg">
+  <img alt="Screen — product design and software" src="./assets/profile-light-v2.svg" width="100%">
 </picture>
 
 I design and build focused software for people who care how their tools feel.
