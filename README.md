@@ -11,14 +11,28 @@ Solo product designer and developer working across web and desktop from Sharjah.
 
 ### Selected work
 
-**[Col](https://github.com/screen-gd/Col)** — A curated place to discover, compare, and understand modern UI libraries.
+### [Col ↗](https://github.com/screen-gd/Col)
 
-**[Closure](https://github.com/screen-gd/Closure)** — Private, self-hosted feedback, changelog, and roadmap software.
+A curated place to discover and compare modern UI libraries.
 
-**[Typo](https://github.com/screen-gd/Typo)** — A cross-platform autocorrect tool designed to stay out of the way.
+<a href="https://github.com/screen-gd/Col">
+  <img src="./assets/work-col.png" alt="Col UI library directory homepage" width="100%">
+</a>
 
-### Current focus
+### [Linkr ↗](https://linkrr-jet.vercel.app)
 
-Thoughtful interfaces, useful automation, and smaller products with sharper ideas.
+A digital contact card for creating, sharing, and keeping the people you meet.
+
+<a href="https://linkrr-jet.vercel.app">
+  <img src="./assets/work-linkr.png" alt="Linkr digital contact card product artwork" width="100%">
+</a>
+
+### [Relay ↗](https://relay-app.cc.cd)
+
+A focused production workspace for solo video editors and small teams.
+
+<a href="https://relay-app.cc.cd">
+  <img src="./assets/work-relay.png" alt="Relay workspace for video editors" width="100%">
+</a>
 
 <sub>TypeScript &middot; Next.js &middot; Electron &middot; Rust</sub>
