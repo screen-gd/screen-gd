@@ -1,13 +1,11 @@
 <p align="center">
-  <img src="./assets/header.svg" width="100%" alt="Screen (screen-gd). Designs and builds web and desktop software. Now building Col and Emc². Stack: TypeScript, Next.js, Electron, Rust. Sharjah, UAE. On X as @screeendev.">
+  <img src="./assets/header.svg" width="100%" alt="Screen (screen-gd), product designer and developer in Sharjah, UAE. Building Col and Emc².">
 </p>
 
 <p align="center">
-  <a href="https://usecol.com">usecol.com</a> ·
-  <a href="https://emclient2.vercel.app">emc²</a> ·
-  <a href="https://znsnexus.com">znsnexus.com</a> ·
-  <a href="https://zaid.us.ci">zaid.us.ci</a> ·
-  <a href="https://x.com/screeendev">@screeendev</a>
+  <a href="https://zaid.us.ci"><img src="./assets/chip-site.svg" height="36" alt="zaid.us.ci"></a>
+  <a href="https://znsnexus.com"><img src="./assets/chip-nexus.svg" height="36" alt="znsnexus.com"></a>
+  <a href="https://x.com/screeendev"><img src="./assets/chip-x.svg" height="36" alt="@screeendev on X"></a>
 </p>
 
 <p align="center">

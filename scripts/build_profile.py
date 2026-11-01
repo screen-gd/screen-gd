@@ -1,317 +1,449 @@
-"""Build the profile README artwork: a terminal header, project tiles and a repo list.
+"""Build the profile README panels as SVGs.
 
-GitHub strips CSS from READMEs, so every styled panel is an SVG image. Each SVG embeds
-a Cascadia Mono subset and its screenshots so it renders the same everywhere.
+GitHub strips CSS from READMEs, so every styled panel is an image. Each SVG embeds
+its fonts (Geist Mono, Geist Pixel) and bitmaps, so it renders the same everywhere.
+
+The header's aurora is a NumPy port of the dithercn Aurora used on zaid.us.ci:
+curtains of light from layered noise, quantised to a five-colour palette with an
+8x8 Bayer matrix.
 
 Usage: python scripts/build_profile.py <avatar image>
 """
 
 import base64
 import io
-import math
 import sys
 from pathlib import Path
 from xml.sax.saxutils import escape
 
+import numpy as np
 from fontTools.subset import Options, Subsetter
 from fontTools.ttLib import TTFont
 from fontTools.varLib.instancer import instantiateVariableFont
-from PIL import Image, ImageFilter
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
-FONT_PATH = Path("C:/Windows/Fonts/CascadiaMono.ttf")
+FONTS = ROOT / "fonts"
 
-BG = "#0a0a0a"
-PANEL = "#111111"
-LINE = "#262626"
-INK = "#ededed"
-DIM = "#8f8f8f"
-FAINT = "#555555"
-ACCENT = "#e5484d"  # the red ring in the avatar
-ADVANCE = 1200 / 2048  # Cascadia Mono advance width per em
+# Panels are drawn at 880 units, close to GitHub's README column, so 14 stays ~14px.
+W = 880
 
-MONO = "Cascadia, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+# One neutral ramp tinted toward the portfolio's midnight, plus electric blue.
+MIDNIGHT = "#02070A"
+SURFACE = "#071017"
+LINE = "#16232D"
+LINE_STRONG = "#1E5A80"
+TEXT = "#E6EDF2"
+SECOND = "#8B98A4"
+MUTED = "#52606B"
+ACCENT = "#0297DE"
+AURORA = ["#02070A", "#0A2A4A", "#0E4F80", "#0297DE", "#FFFFFF"]
+
+MONO_ADVANCE = 0.6  # Geist Mono advance per em
+
+LANG_COLORS = {"TypeScript": "#3178C6", "JavaScript": "#F1E05A", "Python": "#3572A5"}
 
 
-def font_face(text: str) -> str:
-    """Return @font-face rules for regular and semibold subsets covering `text`."""
+# ---------------------------------------------------------------- fonts
+
+def subset(font: TTFont, text: str) -> str:
+    options = Options()
+    options.flavor = "woff2"
+    options.layout_features = []
+    subsetter = Subsetter(options)
+    subsetter.populate(text=text + " ")
+    subsetter.subset(font)
+    font.flavor = "woff2"
+    buffer = io.BytesIO()
+    font.save(buffer)
+    return base64.b64encode(buffer.getvalue()).decode()
+
+
+def font_faces(text: str, pixel_text: str) -> str:
     rules = []
-    for weight in (400, 600):
-        font = instantiateVariableFont(TTFont(FONT_PATH), {"wght": weight})
-        options = Options()
-        options.flavor = "woff2"
-        options.layout_features = []
-        subsetter = Subsetter(options)
-        subsetter.populate(text=text + " ")
-        subsetter.subset(font)
-        font.flavor = "woff2"
-        buffer = io.BytesIO()
-        font.save(buffer)
-        data = base64.b64encode(buffer.getvalue()).decode()
-        rules.append(
-            f"@font-face{{font-family:Cascadia;font-weight:{weight};"
-            f"src:url(data:font/woff2;base64,{data}) format('woff2')}}"
-        )
+    for weight, name in ((400, "GeistMono-Regular.ttf"), (500, "GeistMono-Medium.ttf")):
+        data = subset(TTFont(FONTS / name), text)
+        rules.append(f"@font-face{{font-family:GM;font-weight:{weight};"
+                     f"src:url(data:font/woff2;base64,{data}) format('woff2')}}")
+    if pixel_text:
+        # ELSH 1 is the "Square" cut: each pixel a separate square, like the dither
+        pixel = instantiateVariableFont(TTFont(FONTS / "GeistPixel.ttf"), {"ELSH": 1})
+        data = subset(pixel, pixel_text)
+        rules.append(f"@font-face{{font-family:GP;src:url(data:font/woff2;base64,{data}) format('woff2')}}")
     return "".join(rules)
 
 
-def svg(width: int, height: int, title: str, body: str, text: str) -> str:
+def svg(width: int, height: int, title: str, body: list[str], text: str, pixel_text: str = "") -> str:
     style = (
-        font_face(text)
-        + f"text{{font-family:{MONO};fill:{DIM};white-space:pre}}"
-        + f".b{{font-weight:600;fill:{INK}}}.i{{fill:{INK}}}.f{{fill:{FAINT}}}.a{{fill:{ACCENT}}}"
+        font_faces(text, pixel_text)
+        + f"text{{font-family:GM,'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;"
+        f"fill:{SECOND};white-space:pre}}"
+        f".p{{fill:{TEXT}}}.m{{fill:{MUTED}}}.a{{fill:{ACCENT}}}.w{{font-weight:500}}"
+        f".px{{font-family:GP,'Geist Pixel','Geist Mono',monospace;fill:{TEXT}}}"
+        "image{image-rendering:pixelated}"
     )
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
         f'width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img">'
-        f"<title>{escape(title)}</title><style>{style}</style>{body}</svg>\n"
+        f"<title>{escape(title)}</title><style>{style}</style>{''.join(body)}</svg>\n"
     )
 
 
-def t(x: float, y: float, content: str, size: int = 14, cls: str = "", anchor: str = "start", extra: str = "") -> str:
-    c = f' class="{cls}"' if cls else ""
-    a = f' text-anchor="{anchor}"' if anchor != "start" else ""
-    return f'<text x="{x}" y="{y}" font-size="{size}"{c}{a}{extra} xml:space="preserve">{escape(content)}</text>'
+class Text:
+    """Collects every string drawn so the font subsets cover exactly those glyphs."""
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    def __call__(self, x: float, y: float, content: str, size: int = 14, cls: str = "",
+                 anchor: str = "start") -> str:
+        self.seen.append(content)
+        c = f' class="{cls}"' if cls else ""
+        a = f' text-anchor="{anchor}"' if anchor != "start" else ""
+        return f'<text x="{x:g}" y="{y:g}" font-size="{size}"{c}{a} xml:space="preserve">{escape(content)}</text>'
+
+    @property
+    def all(self) -> str:
+        return "".join(self.seen)
 
 
-def window(x: int, y: int, w: int, h: int, label: str, note: str = "") -> str:
-    """A titled TUI pane: a prompt-coloured marker, a name and a right-aligned note."""
-    parts = [
-        f'<rect x="{x + .5}" y="{y + .5}" width="{w - 1}" height="{h - 1}" rx="8" fill="{PANEL}" stroke="{LINE}"/>',
-        f'<line x1="{x}" y1="{y + 36.5}" x2="{x + w}" y2="{y + 36.5}" stroke="{LINE}"/>',
-        t(x + 18, y + 23, "~", 13, "a"),
-        t(x + 34, y + 23, label, 13, "b"),
-    ]
+def rect(x: float, y: float, w: float, h: float, fill: str = "none", stroke: str = "") -> str:
+    if stroke:
+        return (f'<rect x="{x + .5:g}" y="{y + .5:g}" width="{w - 1:g}" height="{h - 1:g}" '
+                f'fill="{fill}" stroke="{stroke}"/>')
+    return f'<rect x="{x:g}" y="{y:g}" width="{w:g}" height="{h:g}" fill="{fill}"/>'
+
+
+def hline(x1: float, x2: float, y: float, color: str = LINE) -> str:
+    return f'<line x1="{x1:g}" y1="{y + .5:g}" x2="{x2:g}" y2="{y + .5:g}" stroke="{color}"/>'
+
+
+def window_bar(t: Text, x: float, y: float, w: float, index: str, label: str, note: str = "",
+               fill: str = SURFACE, line: str = LINE) -> list[str]:
+    """A tmux-style title bar: index, name and a muted note on the right."""
+    h = 28
+    parts = [rect(x, y, w, h, fill), hline(x, x + w, y + h - 1, line)]
+    parts.append(rect(x + 8, y + 6, 16, 16, "#0B2233"))
+    parts.append(t(x + 16, y + 18, index, 12, "a w", "middle"))
+    parts.append(t(x + 32, y + 18, label, 12, "p w"))
     if note:
-        parts.append(t(x + w - 18, y + 23, note, 13, "f", "end"))
-    return "".join(parts)
+        parts.append(t(x + w - 12, y + 18, note, 12, "m", "end"))
+    return parts
 
 
-# ---------------------------------------------------------------- ASCII avatar
-
-RAMP = " .:-=+*#%@"
-
-# The avatar's ring, as an ellipse in a 0..1 unit square of the uncropped image:
-# centre, semi-axes and tilt. Its red is too faint to detect from pixels.
-RING = (0.405, 0.333, 0.266, 0.036, -0.351)
+def png_data(img: Image.Image) -> str:
+    buffer = io.BytesIO()
+    img.save(buffer, "PNG", optimize=True)
+    return base64.b64encode(buffer.getvalue()).decode()
 
 
-def on_ring(u: float, v: float) -> bool:
-    """True near the ring's front arc; the back arc is hidden behind the head."""
-    cx, cy, a, b, angle = RING
-    dx, dy = u - cx, v - cy
-    ca, sa = math.cos(angle), math.sin(angle)
-    x, y = dx * ca + dy * sa, -dx * sa + dy * ca
-    near = abs(math.hypot(x / a, y / b) - 1) < 0.2 or (abs(y) < b * 1.3 and abs(abs(x) - a) < 0.025)
-    return near and (y > -b * 0.2 or abs(x) > a * 0.8)
+def jpeg_data(img: Image.Image) -> str:
+    buffer = io.BytesIO()
+    img.convert("RGB").save(buffer, "JPEG", quality=86, optimize=True, progressive=True)
+    return base64.b64encode(buffer.getvalue()).decode()
 
 
-def ascii_rows(avatar: Path, cols: int, rows: int, crop: float = 0.07) -> list[list[tuple[str, bool]]]:
-    """Map the avatar to characters. Edges get the densest glyphs so the silhouette reads;
-    cells on the ring are flagged for the accent colour."""
-    with Image.open(avatar) as im:
-        gray = im.convert("L")
-        side = min(gray.size)
-        box = (int(side * crop), int(side * crop), int(side * (1 - crop)), int(side * (1 - crop)))
-        gray = gray.crop(box).filter(ImageFilter.GaussianBlur(side / 260))
-        small = gray.resize((cols, rows), Image.LANCZOS)
-        edges = small.filter(ImageFilter.FIND_EDGES)
-    out = []
-    for yy in range(rows):
-        row = []
-        for xx in range(cols):
-            lum = small.getpixel((xx, yy)) / 255
-            # FIND_EDGES marks the image border itself; ignore it
-            border = xx in (0, cols - 1) or yy in (0, rows - 1)
-            edge = 0 if border else edges.getpixel((xx, yy)) / 255
-            # interior whites become mid-density texture, outlines become solid
-            level = 0.62 * lum ** 1.4 + 0.9 * edge
-            if lum < 0.12 and edge < 0.18:
-                level = 0
-            ch = RAMP[max(0, min(len(RAMP) - 1, int(level * len(RAMP))))]
-            u = crop + (xx + 0.5) / cols * (1 - 2 * crop)
-            v = crop + (yy + 0.5) / rows * (1 - 2 * crop)
-            row.append((ch, on_ring(u, v) and ch != " "))
-        out.append(row)
-    return out
+def image(x: float, y: float, w: float, h: float, data: str, mime: str) -> str:
+    uri = f"data:{mime};base64,{data}"
+    return (f'<image x="{x:g}" y="{y:g}" width="{w:g}" height="{h:g}" '
+            f'preserveAspectRatio="xMidYMid slice" href="{uri}" xlink:href="{uri}"/>')
 
 
-def ascii_block(rows: list[list[tuple[str, bool]]], cx: float, top: float, size: float, lead: float) -> str:
-    width = len(rows[0]) * size * ADVANCE
-    x = cx - width / 2
-    lines = []
-    for i, row in enumerate(rows):
-        spans, run, run_red = [], "", False
-        for ch, red in row:
-            if red != run_red and run:
-                spans.append((run, run_red))
-                run = ""
-            run_red = red
-            run += ch
-        spans.append((run, run_red))
-        inner = "".join(
-            f'<tspan class="a">{escape(s)}</tspan>' if red else escape(s) for s, red in spans
-        )
-        lines.append(
-            f'<text x="{x:.1f}" y="{top + i * lead:.1f}" font-size="{size}" class="i" '
-            f'xml:space="preserve" opacity=".92">{inner}</text>'
-        )
-    return "".join(lines)
+# ---------------------------------------------------------------- dither
+
+BAYER8 = np.array([
+    [0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26],
+    [12, 44, 4, 36, 14, 46, 6, 38], [60, 28, 52, 20, 62, 30, 54, 22],
+    [3, 35, 11, 43, 1, 33, 9, 41], [51, 19, 59, 27, 49, 17, 57, 25],
+    [15, 47, 7, 39, 13, 45, 5, 37], [63, 31, 55, 23, 61, 29, 53, 21],
+]) / 64 + 1 / 128
+
+
+def ordered_dither(tone: np.ndarray, colors: int) -> np.ndarray:
+    """Palette index per cell: tone in [0,1] split into `colors` steps by a Bayer threshold."""
+    rows, cols = tone.shape
+    threshold = np.tile(BAYER8, (rows // 8 + 1, cols // 8 + 1))[:rows, :cols]
+    scaled = np.clip(tone, 0, 1) * (colors - 1)
+    index = np.floor(scaled)
+    return np.minimum(index + (scaled - index > threshold), colors - 1).astype(np.uint8)
+
+
+def palette_image(index: np.ndarray, colors: list[str]) -> Image.Image:
+    img = Image.fromarray(index, "P")
+    flat = []
+    for c in colors:
+        flat += [int(c[i:i + 2], 16) for i in (1, 3, 5)]
+    img.putpalette(flat)
+    return img
+
+
+class Noise:
+    """Vectorised 2D gradient noise in roughly [-1, 1], standing in for GLSL snoise."""
+
+    def __init__(self, seed: int = 7) -> None:
+        rng = np.random.default_rng(seed)
+        self.perm = np.concatenate([rng.permutation(256)] * 2)
+        angles = rng.uniform(0, 2 * np.pi, 256)
+        self.grad = np.stack([np.cos(angles), np.sin(angles)], -1)
+
+    def __call__(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        xi, yi = np.floor(x).astype(int), np.floor(y).astype(int)
+        xf, yf = x - xi, y - yi
+        xi, yi = xi & 255, yi & 255
+
+        def corner(dx: int, dy: int) -> np.ndarray:
+            g = self.grad[self.perm[self.perm[xi + dx] + yi + dy] & 255]
+            return g[..., 0] * (xf - dx) + g[..., 1] * (yf - dy)
+
+        u = xf * xf * xf * (xf * (xf * 6 - 15) + 10)
+        v = yf * yf * yf * (yf * (yf * 6 - 15) + 10)
+        top = corner(0, 0) + u * (corner(1, 0) - corner(0, 0))
+        bottom = corner(0, 1) + u * (corner(1, 1) - corner(0, 1))
+        return (top + v * (bottom - top)) * 1.9
+
+    def fbm(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        total, amp = 0.0, 0.5
+        for _ in range(4):
+            total = total + amp * (self(x, y) * 0.5 + 0.5)
+            x, y, amp = x * 2.02, y * 2.02, amp * 0.5
+        # gradient noise is flatter than GLSL simplex; stretch so rays get their contrast
+        return np.clip(0.5 + (total / 0.9375 - 0.5) * 2.4, 0, 1)
+
+
+def smoothstep(e0: float, e1: float, x: np.ndarray) -> np.ndarray:
+    k = np.clip((x - e0) / (e1 - e0), 0, 1)
+    return k * k * (3 - 2 * k)
+
+
+def aurora(cols: int, rows: int, *, curtains: int = 4, height: float = 0.36, spread: float = 0.06,
+           sway: float = 1.4, turbulence: float = 0.8, rays: float = 10, length: float = 0.8,
+           glow: float = 1.1, intensity: float = 0.95, drift: float = 0.25,
+           t: float = 11.0) -> np.ndarray:
+    """Tone field from the dithercn Aurora shader (direction up, no tilt, no mask).
+    Defaults are the AuroraHero settings from the portfolio."""
+    noise = Noise()
+    ux, uy = np.meshgrid((np.arange(cols) + 0.5) / cols, 1 - (np.arange(rows) + 0.5) / rows)
+    py = uy  # y points up, as in GLSL
+    x = (ux - 0.5) * cols / rows + t * drift * 0.04
+    const = lambda v: np.full_like(x, v)  # noqa: E731
+    decay = 15.0 + (2.2 - 15.0) * length
+    light = np.zeros_like(x)
+    for i in range(curtains):
+        depth = i / max(curtains - 1, 1)
+        edge = (height + i * spread
+                + sway * 0.11 * noise(x * 0.55 + i * 3.1, const(t * 0.035 + i * 1.7))
+                + turbulence * 0.05 * noise(x * 2.1 - i * 1.3, const(t * 0.07 + i)))
+        above = py - edge
+        curtain = np.where(above > 0, np.exp(-np.abs(above) * decay * (1 + i * 0.4)),
+                           np.exp(-np.abs(above) * 48))
+        rx = (x + noise(x * 0.8, const(t * 0.03 + i)) * (0.25 + 0.35 * sway)) * rays
+        ray = 0.2 + 0.8 * smoothstep(0.25, 0.75, noise.fbm(rx + i * 9.0, const(t * 0.045 + i)))
+        ray = ray * (0.75 + 0.25 * noise(rx * 3.2, const(i * 4.0 + t * 0.02)))
+        patch = 0.3 + 0.7 * smoothstep(0.25, 0.7, noise.fbm(x * 0.45 + i * 5.0, const(t * 0.02 + i * 2)))
+        rim = np.exp(-np.abs(above) * 34) * glow
+        haze = np.where(above > 0, np.exp(-np.abs(above) * 5) * 0.09, np.exp(-np.abs(above) * 14) * 0.05)
+        light += (curtain * ray + rim * (0.5 + 0.5 * ray) + haze) * patch * (1 - 0.5 * depth)
+    return (1 - np.exp(-light * 1.25)) * intensity
 
 
 # ---------------------------------------------------------------- header
 
-PROMPTS = [
-    'Try "ship the inbox before the coffee wears off"',
-    'Try "find a date picker that isn\'t ugly"',
-    'Try "one more level, then sleep"',
-]
+# The shader's noise isn't periodic, so the loop plays forward then back.
+FRAMES = 20
+SECONDS_PER_FRAME = 0.2
+TIME_SCALE = 2.0  # run the shader clock twice as fast so 4 seconds shows real movement
+
+
+def animated_frames(frames: list[str], x: float, y: float, w: float, h: float) -> list[str]:
+    """Stack the frames and show one at a time with discrete opacity steps (ping-pong)."""
+    order = list(range(len(frames))) + list(range(len(frames) - 2, 0, -1))
+    steps = len(order)
+    times = ";".join(f"{k / steps:.4f}" for k in range(steps))
+    duration = steps * SECONDS_PER_FRAME
+    parts = []
+    for n, data in enumerate(frames):
+        values = ";".join("1" if f == n else "0" for f in order)
+        uri = f"data:image/png;base64,{data}"
+        parts.append(
+            f'<image x="{x:g}" y="{y:g}" width="{w:g}" height="{h:g}" preserveAspectRatio="none" '
+            f'href="{uri}" xlink:href="{uri}" opacity="{1 if n == 0 else 0}">'
+            f'<animate attributeName="opacity" values="{values}" keyTimes="{times}" '
+            f'dur="{duration:g}s" calcMode="discrete" repeatCount="indefinite"/></image>'
+        )
+    return parts
+
+def dithered_avatar(path: Path, cells: int) -> Image.Image:
+    with Image.open(path) as im:
+        gray = im.convert("L")
+        side = min(gray.size)
+        crop = int(side * 0.06)
+        gray = gray.crop((crop, crop, side - crop, side - crop)).resize((cells, cells), Image.LANCZOS)
+    tone = np.clip((np.asarray(gray, dtype=float) / 255 - 0.08) / 0.9, 0, 1) ** 1.2
+    colors = [MIDNIGHT, "#0E4F80", ACCENT, "#FFFFFF"]
+    return palette_image(ordered_dither(tone, len(colors)), colors)
 
 
 def header(avatar: Path) -> str:
-    W, H = 1200, 660
+    t = Text()
+    strip, scene_h = 28, 312
+    H = strip + scene_h
+    cell = 2  # aurora cell in viewBox units; the portfolio hero uses 2px
+    frames = []
+    for n in range(FRAMES):
+        tone = aurora(W // cell, scene_h // cell, height=0.38, length=0.85, rays=12,
+                      t=11.0 + n * SECONDS_PER_FRAME * TIME_SCALE)
+        scene = palette_image(ordered_dither(tone, len(AURORA)), AURORA)
+        frames.append(png_data(scene.resize((scene.width * 2, scene.height * 2), Image.NEAREST)))
+
     body = [
-        f'<rect x=".5" y=".5" width="{W - 1}" height="{H - 1}" rx="14" fill="{BG}" stroke="{LINE}"/>',
-        *[f'<circle cx="{26 + i * 20}" cy="24" r="6" fill="#2c2c2c"/>' for i in range(3)],
-        t(W / 2, 29, "~/screen-gd", 14, "f", "middle"),
-        # main pane with its label cut into the top border
-        f'<rect x="32.5" y="62.5" width="1135" height="463" rx="8" fill="none" stroke="{LINE}"/>',
-        f'<rect x="50" y="54" width="{len("screen-gd") * 14 * ADVANCE + 20:.0f}" height="18" fill="{BG}"/>',
-        t(60, 68, "screen-gd", 14, "i"),
+        rect(0, 0, W, H, MIDNIGHT),
+        t(12, 19, "~/screen-gd", 12, "p w"),
+        t(W - 12, 19, "aurora from zaid.us.ci", 12, "m", "end"),
+        *animated_frames(frames, 0, strip, W, scene_h),
+        hline(0, W, strip - 1),
     ]
 
-    # left column: name, ASCII portrait, location
-    cx = 262
-    body.append(t(cx, 112, "Screen", 18, "b", "middle"))
-    rows = ascii_rows(avatar, cols=78, rows=39)
-    body.append(ascii_block(rows, cx, 140, 7.2, 8.5))
-    body.append(t(cx, 498, "Sharjah, UAE", 14, "f", "middle"))
-    body.append(f'<line x1="492.5" y1="96" x2="492.5" y2="494" stroke="{LINE}"/>')
+    # floating window
+    # 28 bar + 24 pad + name, subtitle and three rows + 24 pad
+    wx, ww, wh = 140, 600, 28 + 24 + 62 + 40 + 48 + 8 + 24
+    wy = strip + (scene_h - wh) // 2
+    body.append(rect(wx, wy, ww, wh, MIDNIGHT))
+    body += window_bar(t, wx, wy, ww, "1", "me", "~/screen-gd", fill=MIDNIGHT, line=LINE_STRONG)
+    body.append(rect(wx, wy, ww, wh, "none", LINE_STRONG))
 
-    # right column
-    x = 532
-    sections = [
-        ("About", 116, [("Designs and builds web & desktop software.", ""),
-                        ("Game dev at heart. Runs on caffeine.", "")]),
-        ("Now", 236, [("Col   ", "i", "UI libraries, all in one place"),
-                      ("Emc²  ", "i", "one inbox for every account")]),
-        ("Stack", 348, [("TypeScript · Next.js · Electron · Rust", "")]),
-        ("Elsewhere", 426, [("znsnexus.com · zaid.us.ci · @screeendev on X", "")]),
-    ]
-    for title, y, lines in sections:
-        body.append(t(x, y, title, 15, "b"))
-        for n, line in enumerate(lines):
-            ly = y + 30 + n * 26
-            if len(line) == 3:
-                lead, cls, rest = line
-                body.append(
-                    f'<text x="{x}" y="{ly}" font-size="15" xml:space="preserve">'
-                    f'<tspan class="{cls}">{escape(lead)}</tspan>{escape(rest)}</text>'
-                )
-            else:
-                body.append(t(x, ly, line[0], 15))
-    body.append(f'<line x1="{x}" y1="196.5" x2="1136" y2="196.5" stroke="{LINE}"/>')
-
-    # prompt bar with rotating placeholders and a blinking cursor
-    body.append(f'<rect x="32.5" y="548.5" width="1135" height="55" rx="8" fill="none" stroke="#333"/>')
-    body.append(t(54, 582, ">", 16, "a"))
+    pad = 24
+    tx = wx + pad
+    top = wy + 28 + pad
+    body.append(t(tx, top + 32, "Screen", 40, "px"))
+    subtitle_y = top + 32 + 30
     body.append(
-        f'<rect x="76" y="565" width="9" height="21" fill="{INK}">'
-        '<animate attributeName="opacity" values="1;1;0;0" keyTimes="0;.5;.5;1" dur="1.1s" repeatCount="indefinite"/></rect>'
+        f'<text x="{tx}" y="{subtitle_y}" font-size="14" xml:space="preserve">'
+        f'<tspan class="m">(screen-gd) · </tspan><tspan class="p">product designer &amp; developer</tspan></text>'
     )
-    n = len(PROMPTS)
-    for i, prompt in enumerate(PROMPTS):
-        # each prompt is visible for its own third of a 12s loop
-        start, end = i / n, (i + 1) / n
-        # discrete steps: a linear ramp would fade the next prompt in over the current one
-        values, times = ["0", "1", "0"], [0, start, end]
-        if i == 0:
-            values, times = ["1", "0"], [0, end]
-        elif i == n - 1:
-            values, times = ["0", "1"], [0, start]
-        body.append(
-            f'<text x="96" y="582" font-size="15" class="f" opacity="{1 if i == 0 else 0}" '
-            f'xml:space="preserve">{escape(prompt)}'
-            f'<animate attributeName="opacity" values="{";".join(values)}" '
-            f'keyTimes="{";".join(f"{v:.3f}" for v in times)}" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>'
-        )
-    body.append(t(54, 634, "? for shortcuts", 13, "f"))
-    body.append(t(1146, 634, "col · emc² · closure · screen-time", 13, "f", "end"))
+    t.seen.append("(screen-gd) · product designer & developer")
 
-    text = "".join(ch for row in rows for ch, _ in row) + "".join(PROMPTS) + str(sections) + \
-        "~/screen-gd Screen Sharjah, UAE ? for shortcuts col · emc² · closure · screen-time >"
-    return svg(W, H, "Screen (screen-gd): designs and builds web and desktop software", "".join(body), text)
+    rows = [
+        ("now", "building Col and Emc²"),
+        ("where", "Sharjah, UAE"),
+        ("also", "game dev, on too much caffeine"),
+    ]
+    ry = subtitle_y + 40
+    for n, (key, value) in enumerate(rows):
+        y = ry + n * 24
+        body.append(t(tx, y, "$", 14, "a"))
+        body.append(t(tx + 20, y, key, 14, "m"))
+        body.append(t(tx + 92, y, value, 14, "p"))
+    # block cursor after the last row
+    cursor_x = tx + 92 + (len(rows[-1][1]) + 1) * 14 * MONO_ADVANCE
+    body.append(
+        f'<rect x="{cursor_x:.1f}" y="{ry + 2 * 24 - 12}" width="8" height="15" fill="{TEXT}">'
+        '<animate attributeName="opacity" values="1;0" keyTimes="0;.5" dur="1.1s" '
+        'calcMode="discrete" repeatCount="indefinite"/></rect>'
+    )
+
+    # dithered avatar tile, top-aligned with the name
+    size = 136
+    ax, ay = wx + ww - pad - size, top
+    portrait = dithered_avatar(avatar, size // 2).resize((size * 2, size * 2), Image.NEAREST)
+    body.append(image(ax, ay, size, size, png_data(portrait), "image/png"))
+    body.append(rect(ax, ay, size, size, "none", LINE))
+
+    return svg(W, H, "Screen (screen-gd): product designer and developer in Sharjah, building Col and Emc²",
+               body, t.all, "Screen")
+
+
+# ---------------------------------------------------------------- link chips
+
+ICONS = {
+    # lucide "globe" and the X logo, both on a 24 grid
+    "globe": '<g fill="none" stroke="{c}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">'
+             '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>'
+             '<path d="M2 12h20"/></g>',
+    "x": '<path fill="{c}" d="M18.9 1.15h3.68l-8.04 9.19L24 22.85h-7.4l-5.8-7.58-6.64 7.58H.47l8.6-9.83L0 '
+         '1.15h7.6l5.24 6.93zM17.6 20.64h2.04L6.49 3.24H4.3z"/>',
+}
+
+
+def chip(icon: str, label: str) -> str:
+    t = Text()
+    h = box = 36
+    width = int(box + 12 + len(label + "  ↗") * 13 * MONO_ADVANCE + 12)
+    width += width % 2
+    body = [
+        rect(0, 0, width, h, MIDNIGHT),
+        f'<g transform="translate({(box - 16) / 2} {(h - 16) / 2}) scale({16 / 24})">'
+        + ICONS[icon].format(c=SECOND) + "</g>",
+        f'<line x1="{box + .5}" y1="0" x2="{box + .5}" y2="{h}" stroke="{LINE}"/>',
+        t(box + 12, 23, label, 13, "p"),
+        t(width - 12, 23, "↗", 13, "m", "end"),
+        rect(0, 0, width, h, "none", LINE),
+    ]
+    return svg(width, h, label, body, t.all)
 
 
 # ---------------------------------------------------------------- project tiles
 
-def tile(image: Path, name: str, kind: str, blurb: str, domain: str, side: str) -> str:
-    """Half of a 1200-wide row. Shown at width=50% with no gap between the two images,
-    so the row matches the header's width; the 16px gutter lives inside the SVGs."""
-    W, H, gutter = 600, 408, 8
+def tile(image_path: Path, index: str, label: str, domain: str, blurb: str, kind: str, side: str) -> str:
+    """Half of an 880 row. Shown at width=50% with no gap between the two images,
+    so the row matches the header's width; the 12 unit gutter is inside the SVGs."""
+    t = Text()
+    half, gutter = W // 2, 6
     x0 = 0 if side == "left" else gutter
-    cw = W - gutter
+    cw = half - gutter
     ih = round(cw * 630 / 1200)
-    with Image.open(image) as im:
-        im = im.convert("RGB").resize((1000, 525), Image.LANCZOS)
-        buffer = io.BytesIO()
-        im.save(buffer, "JPEG", quality=84, optimize=True, progressive=True)
-    data = base64.b64encode(buffer.getvalue()).decode()
-    body = [
-        f'<defs><clipPath id="c"><rect x="{x0}" width="{cw}" height="{H}" rx="10"/></clipPath></defs>',
-        f'<g clip-path="url(#c)"><rect x="{x0}" width="{cw}" height="{H}" fill="{PANEL}"/>',
-        f'<image x="{x0}" y="0" width="{cw}" height="{ih}" preserveAspectRatio="xMidYMid slice" '
-        f'href="data:image/jpeg;base64,{data}" xlink:href="data:image/jpeg;base64,{data}"/>',
-        f'<line x1="{x0}" y1="{ih + .5}" x2="{x0 + cw}" y2="{ih + .5}" stroke="{LINE}"/></g>',
-        f'<rect x="{x0 + .5}" y=".5" width="{cw - 1}" height="{H - 1}" rx="10" fill="none" stroke="{LINE}"/>',
-        t(x0 + 22, ih + 41, name, 22, "b"),
-        t(x0 + cw - 22, ih + 41, kind, 13, "f", "end"),
-        t(x0 + 22, ih + 71, blurb, 14),
-        t(x0 + cw - 22, ih + 71, domain, 14, "i", "end"),
-    ]
-    text = name + kind + blurb + domain
-    return svg(W, H, f"{name}: {blurb} ({domain})", "".join(body), text)
+    with Image.open(image_path) as im:
+        shot = im.convert("RGB").resize((cw * 2, ih * 2), Image.LANCZOS)
+    H = 28 + ih + 48
+    body = [rect(x0, 0, cw, H, MIDNIGHT)]
+    body += window_bar(t, x0, 0, cw, index, label, domain)
+    body.append(image(x0, 28, cw, ih, jpeg_data(shot), "image/jpeg"))
+    body.append(hline(x0, x0 + cw, 28 + ih))
+    body.append(t(x0 + 16, 28 + ih + 29, blurb, 13, "p"))
+    body.append(t(x0 + cw - 16, 28 + ih + 29, kind, 12, "m", "end"))
+    body.append(rect(x0, 0, cw, H, "none", LINE))
+    return svg(half, H, f"{label}: {blurb} ({domain})", body, t.all)
 
 
 # ---------------------------------------------------------------- repo list
 
 REPOS = [
-    ("Closure", "self-hosted feedback, changelog & roadmap", "web", "TypeScript"),
-    ("screen-time", "which app and which website took your day", "windows", "JavaScript"),
-    ("Syllo", "work in progress", "-", "Python"),
+    ("Closure", "self-hosted feedback, changelog and roadmap", "TypeScript"),
+    ("screen-time", "which app and which website took your day, on Windows", "JavaScript"),
+    ("Syllo", "work in progress", "Python"),
 ]
 
 
 def repo_list() -> str:
-    W = 1200
-    row_h = 46
-    H = 37 + 34 + row_h * len(REPOS) + 14
-    body = [
-        f'<rect width="{W}" height="{H}" rx="8" fill="{BG}"/>',
-        window(0, 0, W, H, "more", "other repos on github.com/screen-gd"),
-        t(22, 60, "repo", 13, "f"), t(380, 60, "what", 13, "f"),
-        t(900, 60, "runs on", 13, "f"), t(1178, 60, "lang", 13, "f", "end"),
-    ]
-    for i, (name, what, where, lang) in enumerate(REPOS):
-        y = 71 + i * row_h
-        body.append(f'<line x1="0" y1="{y + .5}" x2="{W}" y2="{y + .5}" stroke="{LINE}"/>')
-        body.append(t(22, y + 29, name, 15, "b"))
-        body.append(t(380, y + 29, what, 14))
-        body.append(t(900, y + 29, where, 14, "i"))
-        body.append(t(1178, y + 29, lang, 14, "f", "end"))
-    text = "".join("".join(r) for r in REPOS) + "~repowhatruns onlangmoreother repos on github.com/screen-gd"
-    return svg(W, H, "More repositories by screen-gd", "".join(body), text)
+    t = Text()
+    row = 56
+    H = 28 + row * len(REPOS)
+    body = [rect(0, 0, W, H, MIDNIGHT)]
+    body += window_bar(t, 0, 0, W, "4", "repos")
+    for i, (name, what, lang) in enumerate(REPOS):
+        y = 28 + i * row
+        if i:
+            body.append(hline(0, W, y))
+        body.append(t(16, y + 24, name, 14, "p w"))
+        body.append(t(16, y + 43, what, 12))
+        lang_w = len(lang) * 12 * MONO_ADVANCE
+        body.append(rect(W - 16 - lang_w - 14, y + 20, 8, 8, LANG_COLORS[lang]))
+        body.append(t(W - 16, y + 28, lang, 12, "", "end"))
+    body.append(rect(0, 0, W, H, "none", LINE))
+    return svg(W, H, "More repositories by screen-gd", body, t.all)
 
 
 def main() -> None:
     avatar = Path(sys.argv[1])
     outputs = {
         "header.svg": header(avatar),
-        "tile-col.svg": tile(ASSETS / "website-col.png", "Col", "web",
-                             "UI libraries, all in one place", "usecol.com", "left"),
-        "tile-emc2.svg": tile(ASSETS / "website-emc2.png", "Emc²", "desktop",
-                              "one inbox for every account", "emclient2.vercel.app", "right"),
+        "chip-site.svg": chip("globe", "zaid.us.ci"),
+        "chip-nexus.svg": chip("globe", "znsnexus.com"),
+        "chip-x.svg": chip("x", "@screeendev"),
+        "tile-col.svg": tile(ASSETS / "website-col.png", "2", "col", "usecol.com",
+                             "UI libraries, all in one place", "web", "left"),
+        "tile-emc2.svg": tile(ASSETS / "website-emc2.png", "3", "emc²", "emclient2.vercel.app",
+                              "One inbox for every account", "desktop", "right"),
         "repos.svg": repo_list(),
     }
     for name, content in outputs.items():
