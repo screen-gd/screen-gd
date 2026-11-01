@@ -1,38 +1,19 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./assets/profile-dark-v2.svg">
-  <source media="(prefers-color-scheme: light)" srcset="./assets/profile-light-v2.svg">
-  <img alt="Screen — product design and software" src="./assets/profile-light-v2.svg" width="100%">
-</picture>
+<p align="center">
+  <img src="./assets/header.svg" width="100%" alt="Screen (screen-gd). Designs and builds web and desktop software. Now building Col and Emc². Stack: TypeScript, Next.js, Electron, Rust. Sharjah, UAE. On X as @screeendev.">
+</p>
 
-I design and build focused software for people who care how their tools feel.
-Solo product designer and developer working across web and desktop from Sharjah.
+<p align="center">
+  <a href="https://usecol.com">usecol.com</a> ·
+  <a href="https://emclient2.vercel.app">emc²</a> ·
+  <a href="https://znsnexus.com">znsnexus.com</a> ·
+  <a href="https://zaid.us.ci">zaid.us.ci</a> ·
+  <a href="https://x.com/screeendev">@screeendev</a>
+</p>
 
-[Portfolio ↗](https://znsnexus.com) &nbsp;&middot;&nbsp; [Elsewhere ↗](https://zaid.us.ci)
+<p align="center">
+  <a href="https://usecol.com"><img src="./assets/tile-col.svg" width="50%" alt="Col: UI libraries, components and design tools, all in one place. usecol.com"></a><a href="https://emclient2.vercel.app"><img src="./assets/tile-emc2.svg" width="50%" alt="Emc²: a desktop email client with one inbox for every account"></a>
+</p>
 
-### Selected work
-
-### [Col ↗](https://github.com/screen-gd/Col)
-
-A curated place to discover and compare modern UI libraries.
-
-<a href="https://github.com/screen-gd/Col">
-  <img src="./assets/work-col-clean.png" alt="Col UI library directory homepage" width="100%">
-</a>
-
-### [Linkr ↗](https://linkrr-jet.vercel.app)
-
-A digital contact card for creating, sharing, and keeping the people you meet.
-
-<a href="https://linkrr-jet.vercel.app">
-  <img src="./assets/work-linkr.png" alt="Linkr digital contact card product artwork" width="100%">
-</a>
-
-### [Relay ↗](https://relay-app.cc.cd)
-
-A focused production workspace for solo video editors and small teams.
-
-<a href="https://relay-app.cc.cd">
-  <img src="./assets/work-relay.png" alt="Relay workspace for video editors" width="100%">
-</a>
-
-<sub>TypeScript &middot; Next.js &middot; Electron &middot; Rust</sub>
+<p align="center">
+  <a href="https://github.com/screen-gd?tab=repositories"><img src="./assets/repos.svg" width="100%" alt="More repositories: Closure, a self-hosted feedback, changelog and roadmap app. screen-time, a Windows screen-time tracker. Syllo, work in progress."></a>
+</p>
