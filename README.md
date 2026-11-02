@@ -1,4 +1,4 @@
-<p align="center"><img src="./assets/header.svg" width="100%" alt="Screen (screen-gd), product designer and developer in Sharjah, UAE. Building Col and Emc²."></p>
+<p align="center"><img src="./assets/header.svg?v=e2a2ee1d0689" width="100%" alt="Screen (screen-gd), product designer and developer in Sharjah, UAE. Building Col and Emc²."></p>
 
 <a href="https://usecol.com"><img src="./assets/tile-col.svg" width="50%" alt="Col: UI libraries, components and design tools, all in one place. usecol.com"></a><a href="https://emclient2.vercel.app"><img src="./assets/tile-emc2.svg" width="50%" alt="Emc²: a desktop email client with one inbox for every account"></a>
 

@@ -11,7 +11,9 @@ Usage: python scripts/build_profile.py
 """
 
 import base64
+import hashlib
 import io
+import re
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -437,6 +439,13 @@ def main() -> None:
     for name, content in outputs.items():
         (ASSETS / name).write_text(content, encoding="utf-8")
         print(f"{name}: {len(content.encode()) // 1024} KB")
+
+    # Change the image URL after a rebuild so GitHub fetches the updated header.
+    version = hashlib.sha256(outputs["header.svg"].encode()).hexdigest()[:12]
+    readme = ROOT / "README.md"
+    readme.write_text(re.sub(r'\./assets/header\.svg(?:\?v=[a-f0-9]+)?',
+                             f"./assets/header.svg?v={version}",
+                             readme.read_text(encoding="utf-8")), encoding="utf-8")
 
 
 if __name__ == "__main__":
