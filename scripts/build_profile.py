@@ -285,7 +285,7 @@ def dithered_avatar(path: Path, cells: int) -> Image.Image:
 
 def header() -> str:
     t = Text()
-    strip, scene_h, details_h = 28, 254, 198
+    strip, scene_h, details_h = 28, 140, 198
     H = strip + scene_h + details_h
     cell = 2  # aurora cell in viewBox units; the portfolio hero uses 2px
     frames = []
@@ -330,7 +330,7 @@ def header() -> str:
         body.append(f'<line x1="{x + .5}" y1="{top}" x2="{x + .5}" y2="{H}" stroke="{LINE}"/>')
     body.append(hline(split, W, top + details_h // 2))
     for x, y, label, value in (
-        (split, top, "LOCATION", "Sharjah, UAE"),
+        (split, top, "Working at", "GitCafe"),
         (middle, top, "FOCUS", "web products"),
         (split, top + 99, "STATUS", "building"),
         (middle, top + 99, "ALSO", "game dev"),
@@ -339,7 +339,7 @@ def header() -> str:
         body.append(t(x + 16, y + 61, value, 13, "p w"))
     body.append(rect(0, 0, W, H, "none", LINE))
 
-    return svg(W, H, "Screen: product designer and developer. Building Col and Emc². Sharjah, UAE.",
+    return svg(W, H, "Screen: product designer and developer. Building Col and Emc². Helping out at GitCafe.",
                body, t.all + "Screen")
 
 
