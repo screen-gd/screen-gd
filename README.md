@@ -2,4 +2,4 @@
 
 <a href="https://usecol.com"><img src="./assets/tile-col.svg" width="50%" alt="Col: UI libraries, components and design tools, all in one place. usecol.com"></a><a href="https://emclient2.vercel.app"><img src="./assets/tile-emc2.svg" width="50%" alt="Emc²: a desktop email client with one inbox for every account"></a>
 
-<p align="center"><a href="https://zaid.us.ci"><img src="./assets/chip-site.svg" height="36" alt="zaid.us.ci"></a> <a href="https://znsnexus.com"><img src="./assets/chip-nexus.svg" height="36" alt="znsnexus.com"></a> <a href="https://x.com/screeendev"><img src="./assets/chip-x.svg" height="36" alt="@screeendev on X"></a></p>
+<p align="center"><a href="https://screeen.us.ci"><img src="./assets/chip-site.svg" height="36" alt="screeen.us.ci"></a> <a href="https://znsnexus.com"><img src="./assets/chip-nexus.svg" height="36" alt="znsnexus.com"></a> <a href="https://x.com/screeendev"><img src="./assets/chip-x.svg" height="36" alt="@screeendev on X"></a></p>

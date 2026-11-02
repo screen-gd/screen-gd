@@ -3,7 +3,7 @@
 GitHub strips CSS from READMEs, so every styled panel is an image. Each SVG embeds
 its fonts (Geist Mono, Geist Pixel) and bitmaps, so it renders the same everywhere.
 
-The header's aurora is a NumPy port of the dithercn Aurora used on zaid.us.ci:
+The header's aurora is a NumPy port of the dithercn Aurora used on screeen.us.ci:
 curtains of light from layered noise, quantised to a five-colour palette with an
 8x8 Bayer matrix.
 
@@ -298,11 +298,21 @@ def header(avatar: Path) -> str:
 
     body = [
         rect(0, 0, W, H, MIDNIGHT),
-        t(12, 19, "~/screen-gd", 12, "p w"),
-        t(W - 12, 19, "aurora from zaid.us.ci", 12, "m", "end"),
+        rect(0, 0, W, strip, SURFACE),
+        t(12, 19, "Screen", 12, "p w"),
+        t(100, 19, "BUILDING", 12, "p w"),
+        t(W - 12, 19, "github.com/screen-gd", 12, "m", "end"),
         *animated_frames(frames, 0, strip, W, scene_h),
         hline(0, W, strip - 1),
     ]
+
+    # Four pixels cycle clockwise to mark ongoing building, with a static fallback.
+    body.append('<style>@keyframes building{0%,24%{opacity:1}25%,100%{opacity:.2}}'
+                '.building{animation:building 1.2s steps(1,end) infinite}'
+                '@media(prefers-reduced-motion:reduce){.building{animation:none}}</style>')
+    for step, (x, y) in enumerate(((79, 10), (85, 10), (85, 16), (79, 16))):
+        body.append(f'<rect class="building" x="{x}" y="{y}" width="4" height="4" '
+                    f'fill="{ACCENT}" style="animation-delay:-{(4-step)*.3:g}s"/>')
 
     # floating window
     # 28 bar + 24 pad + name, subtitle and three rows + 24 pad
@@ -384,13 +394,12 @@ def chip(icon: str, label: str) -> str:
 
 # ---------------------------------------------------------------- project tiles
 
-def tile(image_path: Path, index: str, label: str, domain: str, blurb: str, kind: str, side: str) -> str:
+def tile(image_path: Path, index: str, label: str, domain: str, blurb: str, kind: str) -> str:
     """Half of an 880 row. Shown at width=50% with no gap between the two images,
-    so the row matches the header's width; the 12 unit gutter is inside the SVGs."""
+    so the cards touch at a shared centre divider, matching the header's width."""
     t = Text()
-    half, gutter = W // 2, 6
-    x0 = 0 if side == "left" else gutter
-    cw = half - gutter
+    half = W // 2
+    x0, cw = 0, half
     ih = round(cw * 630 / 1200)
     with Image.open(image_path) as im:
         shot = im.convert("RGB").resize((cw * 2, ih * 2), Image.LANCZOS)
@@ -437,13 +446,13 @@ def main() -> None:
     avatar = Path(sys.argv[1])
     outputs = {
         "header.svg": header(avatar),
-        "chip-site.svg": chip("globe", "zaid.us.ci"),
+        "chip-site.svg": chip("globe", "screeen.us.ci"),
         "chip-nexus.svg": chip("globe", "znsnexus.com"),
         "chip-x.svg": chip("x", "@screeendev"),
         "tile-col.svg": tile(ASSETS / "website-col.png", "2", "col", "usecol.com",
-                             "UI libraries, all in one place", "web", "left"),
+                             "UI libraries, all in one place", "web"),
         "tile-emc2.svg": tile(ASSETS / "website-emc2.png", "3", "emc²", "emclient2.vercel.app",
-                              "One inbox for every account", "desktop", "right"),
+                              "One inbox for every account", "desktop"),
         "repos.svg": repo_list(),
     }
     for name, content in outputs.items():
