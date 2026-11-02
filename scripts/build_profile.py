@@ -7,12 +7,11 @@ The header's aurora is a NumPy port of the dithercn Aurora used on screeen.us.ci
 curtains of light from layered noise, quantised to a five-colour palette with an
 8x8 Bayer matrix.
 
-Usage: python scripts/build_profile.py <avatar image>
+Usage: python scripts/build_profile.py
 """
 
 import base64
 import io
-import sys
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -284,10 +283,10 @@ def dithered_avatar(path: Path, cells: int) -> Image.Image:
     return palette_image(ordered_dither(tone, len(colors)), colors)
 
 
-def header(avatar: Path) -> str:
+def header() -> str:
     t = Text()
-    strip, scene_h = 28, 312
-    H = strip + scene_h
+    strip, scene_h, details_h = 28, 254, 198
+    H = strip + scene_h + details_h
     cell = 2  # aurora cell in viewBox units; the portfolio hero uses 2px
     frames = []
     for n in range(FRAMES):
@@ -314,53 +313,34 @@ def header(avatar: Path) -> str:
         body.append(f'<rect class="building" x="{x}" y="{y}" width="4" height="4" '
                     f'fill="{ACCENT}" style="animation-delay:-{(4-step)*.3:g}s"/>')
 
-    # floating window
-    # 28 bar + 24 pad + name, subtitle and three rows + 24 pad
-    wx, ww, wh = 140, 600, 28 + 24 + 62 + 40 + 48 + 8 + 24
-    wy = strip + (scene_h - wh) // 2
-    body.append(rect(wx, wy, ww, wh, MIDNIGHT))
-    body += window_bar(t, wx, wy, ww, "1", "me", "~/screen-gd", fill=MIDNIGHT, line=LINE_STRONG)
-    body.append(rect(wx, wy, ww, wh, "none", LINE_STRONG))
+    # The banner sits above a name panel and a two-by-two details grid.
+    top = strip + scene_h
+    split, middle = 536, 708
+    body += [rect(0, top, W, details_h, MIDNIGHT), hline(0, W, top)]
+    body.append(f'<text x="24" y="{top + 62}" font-size="54" '
+                f'style="font-family:Arial,Helvetica,sans-serif;letter-spacing:-2px" '
+                f'class="p">Screen</text>')
+    body.append(t(24, top + 90, "Product designer and developer.", 14, "p"))
+    for n, (label, value) in enumerate((("NOW", "building Col and Emc²"),
+                                       ("HANDLE", "@screen-gd"))):
+        y = top + 136 + n * 28
+        body.append(t(24, y, label, 11, "m"))
+        body.append(t(104, y, value, 13, "p w"))
+    for x in (split, middle):
+        body.append(f'<line x1="{x + .5}" y1="{top}" x2="{x + .5}" y2="{H}" stroke="{LINE}"/>')
+    body.append(hline(split, W, top + details_h // 2))
+    for x, y, label, value in (
+        (split, top, "LOCATION", "Sharjah, UAE"),
+        (middle, top, "FOCUS", "web products"),
+        (split, top + 99, "STATUS", "building"),
+        (middle, top + 99, "ALSO", "game dev"),
+    ):
+        body.append(t(x + 16, y + 28, label, 10, "m"))
+        body.append(t(x + 16, y + 61, value, 13, "p w"))
+    body.append(rect(0, 0, W, H, "none", LINE))
 
-    pad = 24
-    tx = wx + pad
-    top = wy + 28 + pad
-    body.append(t(tx, top + 32, "Screen", 40, "px"))
-    subtitle_y = top + 32 + 30
-    body.append(
-        f'<text x="{tx}" y="{subtitle_y}" font-size="14" xml:space="preserve">'
-        f'<tspan class="m">(screen-gd) · </tspan><tspan class="p">product designer &amp; developer</tspan></text>'
-    )
-    t.seen.append("(screen-gd) · product designer & developer")
-
-    rows = [
-        ("now", "building Col and Emc²"),
-        ("where", "Sharjah, UAE"),
-        ("also", "game dev, on too much caffeine"),
-    ]
-    ry = subtitle_y + 40
-    for n, (key, value) in enumerate(rows):
-        y = ry + n * 24
-        body.append(t(tx, y, "$", 14, "a"))
-        body.append(t(tx + 20, y, key, 14, "m"))
-        body.append(t(tx + 92, y, value, 14, "p"))
-    # block cursor after the last row
-    cursor_x = tx + 92 + (len(rows[-1][1]) + 1) * 14 * MONO_ADVANCE
-    body.append(
-        f'<rect x="{cursor_x:.1f}" y="{ry + 2 * 24 - 12}" width="8" height="15" fill="{TEXT}">'
-        '<animate attributeName="opacity" values="1;0" keyTimes="0;.5" dur="1.1s" '
-        'calcMode="discrete" repeatCount="indefinite"/></rect>'
-    )
-
-    # dithered avatar tile, top-aligned with the name
-    size = 136
-    ax, ay = wx + ww - pad - size, top
-    portrait = dithered_avatar(avatar, size // 2).resize((size * 2, size * 2), Image.NEAREST)
-    body.append(image(ax, ay, size, size, png_data(portrait), "image/png"))
-    body.append(rect(ax, ay, size, size, "none", LINE))
-
-    return svg(W, H, "Screen (screen-gd): product designer and developer in Sharjah, building Col and Emc²",
-               body, t.all, "Screen")
+    return svg(W, H, "Screen: product designer and developer. Building Col and Emc². Sharjah, UAE.",
+               body, t.all + "Screen")
 
 
 # ---------------------------------------------------------------- link chips
@@ -443,9 +423,8 @@ def repo_list() -> str:
 
 
 def main() -> None:
-    avatar = Path(sys.argv[1])
     outputs = {
-        "header.svg": header(avatar),
+        "header.svg": header(),
         "chip-site.svg": chip("globe", "screeen.us.ci"),
         "chip-nexus.svg": chip("globe", "znsnexus.com"),
         "chip-x.svg": chip("x", "@screeendev"),
