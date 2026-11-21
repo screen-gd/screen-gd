@@ -3,12 +3,13 @@
 GitHub strips CSS from READMEs, so every styled panel is an image. Each SVG embeds
 its fonts (Geist Mono, Geist Pixel) and bitmaps, so it renders the same everywhere.
 
-The layout is a bento grid of rounded cards on a transparent background: a wide
-header with an animated aurora, two project tiles, then three link chips. Every
-SVG keeps a transparent PAD margin around its card, so images that touch still
-show an even GAP gutter.
+The design is a night sky map: one 880x660 star chart emitted as seven slices
+that tile seamlessly in the README. The aurora glows along the horizon behind a
+stepped skyline, projects and links hang in the sky as labelled stars joined
+into a constellation, and the graticule sits on the slice boundaries so the
+seams between images read as grid lines.
 
-The header's aurora is a NumPy port of the dithercn Aurora used on screeen.us.ci:
+The aurora is a NumPy port of the dithercn Aurora used on screeen.us.ci:
 curtains of light from layered noise, quantised to a five-colour palette with an
 8x8 Bayer matrix.
 
@@ -18,6 +19,7 @@ Usage: python scripts/build_profile.py
 import base64
 import hashlib
 import io
+import math
 import re
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -34,12 +36,7 @@ FONTS = ROOT / "fonts"
 
 # Panels are drawn at 880 units, close to GitHub's README column, so 14 stays ~14px.
 W = 880
-
-# Bento geometry: GAP between cards, PAD of transparent margin baked into every
-# SVG so touching images produce an even gutter, RADIUS for the card corners.
-GAP = 8
-PAD = GAP // 2
-RADIUS = 14
+RADIUS = 14  # the plate's rounded corners
 
 # One neutral ramp tinted toward the portfolio's midnight, plus electric blue.
 MIDNIGHT = "#02070A"
@@ -86,21 +83,25 @@ def font_faces(text: str, pixel_text: str) -> str:
     return "".join(rules)
 
 
-def svg(width: float, height: float, title: str, body: list[str], text: str,
-        pixel_text: str = "") -> str:
-    style = (
+def css(text: str, pixel_text: str = "") -> str:
+    """The <style> content every panel shares: font subsets and text classes.
+    GM follows GP in .px so glyphs Geist Pixel lacks fall back per glyph."""
+    return (
         font_faces(text, pixel_text)
         + f"text{{font-family:GM,'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;"
         f"fill:{SECOND};white-space:pre}}"
         f".p{{fill:{TEXT}}}.m{{fill:{MUTED}}}.a{{fill:{ACCENT}}}.w{{font-weight:500}}"
-        # GM sits before the system names so glyphs missing from Geist Pixel
-        # fall back per glyph to the embedded mono.
         f".px{{font-family:GP,GM,'Geist Pixel','Geist Mono',monospace;fill:{TEXT}}}"
         "image{image-rendering:pixelated}"
     )
+
+
+def svg(width: float, height: float, title: str, body: list[str], style: str,
+        viewbox: tuple[float, ...] = ()) -> str:
+    vb = " ".join(f"{v:g}" for v in (viewbox or (0.0, 0.0, width, height)))
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
-        f'width="{width:g}" height="{height:g}" viewBox="0 0 {width:g} {height:g}" role="img">'
+        f'width="{width:g}" height="{height:g}" viewBox="{vb}" role="img">'
         f"<title>{escape(title)}</title><style>{style}</style>{''.join(body)}</svg>\n"
     )
 
@@ -144,7 +145,7 @@ def rect(x: float, y: float, w: float, h: float, fill: str = "none", stroke: str
 
 def card(x: float, y: float, w: float, h: float, fill: str, stroke: str = "",
          rx: float = RADIUS) -> str:
-    """A rounded card rect; the stroked variant insets by .5 like rect."""
+    """A rounded rect; the stroked variant insets by .5 like rect."""
     if stroke:
         return (f'<rect x="{x + .5:g}" y="{y + .5:g}" width="{w - 1:g}" height="{h - 1:g}" '
                 f'rx="{rx:g}" fill="{fill}" stroke="{stroke}"/>')
@@ -174,9 +175,10 @@ def window_bar(t: Text, x: float, y: float, w: float, index: str, label: str, no
     return parts
 
 
-def png_data(img: Image.Image) -> str:
+def png_data(img: Image.Image, transparency: int | None = None) -> str:
     buffer = io.BytesIO()
-    img.save(buffer, "PNG", optimize=True)
+    extra = {} if transparency is None else {"transparency": transparency}
+    img.save(buffer, "PNG", optimize=True, **extra)
     return base64.b64encode(buffer.getvalue()).decode()
 
 
@@ -289,7 +291,7 @@ def aurora(cols: int, rows: int, *, curtains: int = 4, height: float = 0.36, spr
     return (1 - np.exp(-light * 1.25)) * intensity
 
 
-# ---------------------------------------------------------------- header
+# ---------------------------------------------------------------- animation
 
 # The shader's noise isn't periodic, so the loop plays forward then back.
 FRAMES = 20
@@ -327,61 +329,7 @@ def dithered_avatar(path: Path, cells: int) -> Image.Image:
     return palette_image(ordered_dither(tone, len(colors)), colors)
 
 
-def header() -> str:
-    """The top card: an animated aurora over MIDNIGHT, fading to dark at the
-    bottom where the avatar, name, tagline and a status pill sit."""
-    t = Text()
-    H = 300
-    cw, ch = W - GAP, H - GAP  # the card inside the PAD margin
-    cell = 2  # aurora cell in viewBox units; the portfolio hero uses 2px
-    frames = []
-    for n in range(FRAMES):
-        tone = aurora(cw // cell, ch // cell, height=0.44, length=0.9, rays=22,
-                      t=11.0 + n * SECONDS_PER_FRAME * TIME_SCALE)
-        scene = palette_image(ordered_dither(tone, len(AURORA)), AURORA)
-        frames.append(png_data(scene.resize((scene.width * 2, scene.height * 2), Image.NEAREST)))
-
-    # The aurora fills the card; a gradient settles the bottom so text stays legible.
-    body = [
-        clip("hero", PAD, PAD, cw, ch),
-        card(PAD, PAD, cw, ch, MIDNIGHT),
-        '<linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">'
-        f'<stop offset="0" stop-color="{MIDNIGHT}" stop-opacity="0"/>'
-        f'<stop offset=".45" stop-color="{MIDNIGHT}" stop-opacity="0"/>'
-        f'<stop offset="1" stop-color="{MIDNIGHT}" stop-opacity=".9"/></linearGradient>',
-        f'<g clip-path="url(#hero)">{"".join(animated_frames(frames, PAD, PAD, cw, ch))}'
-        f'<rect x="{PAD}" y="{PAD}" width="{cw}" height="{ch}" fill="url(#fade)"/></g>',
-    ]
-
-    # The dithered avatar, name, tagline and status pill sit along the bottom.
-    ax, ay = PAD + 28, PAD + ch - 28 - 72
-    avatar = dithered_avatar(ASSETS / "avatar.jpg", 36)
-    body.append(clip("face", ax, ay, 72, 72, rx=10))
-    body.append(f'<g clip-path="url(#face)">{image(ax, ay, 72, 72, png_data(avatar), "image/png")}</g>')
-    body.append(card(ax, ay, 72, 72, "none", LINE_STRONG, rx=10))
-    nx = ax + 72 + 18
-    body.append(t.px(nx, ay + 46, "Screen", 56))
-    body.append(t(nx, ay + 72 - 4, "Product designer and developer. Working at GitCafe.", 13, "p"))
-
-    # A blinking square marks ongoing building, with a static fallback.
-    body.append('<style>@keyframes building{0%,24%{opacity:1}25%,100%{opacity:.2}}'
-                '.building{animation:building 1.2s steps(1,end) infinite}'
-                '@media(prefers-reduced-motion:reduce){.building{animation:none}}</style>')
-    label = "Building Col and Emc²"
-    pw = 14 + 6 + 10 + len(label) * 12 * MONO_ADVANCE + 14
-    px0, py0 = PAD + cw - 28 - pw, ay + 72 - 30
-    body.append(f'<rect x="{px0 + .5:g}" y="{py0 + .5:g}" width="{pw - 1:g}" height="29" rx="15" '
-                f'fill="{SURFACE}" fill-opacity=".85" stroke="{LINE_STRONG}"/>')
-    body.append(f'<rect class="building" x="{px0 + 14:g}" y="{py0 + 12:g}" width="6" height="6" '
-                f'fill="{ACCENT}"/>')
-    body.append(t(px0 + 30, py0 + 19.5, label, 12, "p w"))
-
-    body.append(card(PAD, PAD, cw, ch, "none", LINE))
-    return svg(W, H, "Screen: product designer and developer. Building Col and Emc². "
-                     "Working at GitCafe.", body, t.all, t.pixels)
-
-
-# ---------------------------------------------------------------- link chips
+# ---------------------------------------------------------------- star chart
 
 ICONS = {
     # lucide "globe" and the X logo, both on a 24 grid
@@ -393,47 +341,249 @@ ICONS = {
 }
 
 
-def chip(icon: str, label: str) -> str:
-    """A third of an 880 row: a small card with an icon, the label and an arrow."""
+def star(x: float, y: float, halo_r: float, arms: float, core: float) -> str:
+    """One labelled star: an ACCENT glow, a cross and a white core."""
+    return (f'<circle cx="{x:g}" cy="{y:g}" r="{halo_r:g}" fill="url(#starglow)"/>'
+            + rect(x - arms, y - 1, arms * 2, 2, ACCENT)
+            + rect(x - 1, y - arms, 2, arms * 2, ACCENT)
+            + rect(x - core / 2, y - core / 2, core, core, "#FFFFFF"))
+
+
+def brackets(x: float, y: float, w: float, h: float, out: float = 4.5, arm: int = 8) -> str:
+    """Path data for four finder brackets sitting `out` units outside a rect."""
+    d = []
+    for cx, dx in ((x, -1), (x + w, 1)):
+        for cy, dy in ((y, -1), (y + h, 1)):
+            d.append(f"M{cx + dx * (out + arm):g} {cy + dy * out:g}h{-dx * arm:g}"
+                     f"M{cx + dx * out:g} {cy + dy * (out + arm):g}v{-dy * arm:g}")
+    return "".join(d)
+
+
+def star_chart() -> dict[str, str]:
+    """One 880x660 night sky map emitted as seven slices whose viewBoxes share
+    master coordinates. Light vector content goes into every slice unfiltered;
+    each embedded bitmap carries a bounding box and lands only in slices it
+    touches, so every star, label and inset stays inside its link's rect."""
     t = Text()
-    w, h = W / 3, 60
-    cw, ch = w - GAP, h - GAP
-    cy = PAD + ch / 2
-    body = [
-        card(PAD, PAD, cw, ch, SURFACE),
-        f'<g transform="translate({PAD + 18} {cy - 8}) scale({16 / 24})">'
-        + ICONS[icon].format(c=SECOND) + "</g>",
-        t(PAD + 18 + 16 + 12, cy + 4.5, label, 13, "p"),
-        t(PAD + cw - 18, cy + 4.5, "↗", 13, "a", "end"),
-        card(PAD, PAD, cw, ch, "none", LINE),
+    H = 660
+    full = (0.0, 0.0, W, H)
+    items: list[tuple[tuple[float, float, float, float], str]] = []
+
+    def light(frag: str) -> None:
+        items.append((full, frag))
+
+    # The plate: MIDNIGHT inside rounded corners, everything clipped to it.
+    light(clip("plate", 0, 0, W, H))
+    light(card(0, 0, W, H, MIDNIGHT))
+    light(f'<radialGradient id="starglow"><stop offset="0" stop-color="{ACCENT}" stop-opacity=".35"/>'
+          f'<stop offset="1" stop-color="{ACCENT}" stop-opacity="0"/></radialGradient>'
+          f'<radialGradient id="moonglow"><stop offset="0" stop-color="{ACCENT}" stop-opacity=".3"/>'
+          f'<stop offset="1" stop-color="{ACCENT}" stop-opacity="0"/></radialGradient>')
+
+    # Graticule: the lines land on every slice boundary, so seams read as grid.
+    gx = [k * W / 6 for k in range(1, 6)]
+    gy = [110, 220, 330, 440, 550]
+    for x in gx:
+        light(f'<line x1="{x + .5:g}" y1="0" x2="{x + .5:g}" y2="{H}" stroke="{LINE}"/>')
+    for y in gy:
+        light(hline(0, W, y))
+    marks = "".join(f"M{x - 4:g} {y + .5}h8M{x + .5:g} {y - 4}v8" for x in gx for y in gy)
+    light(f'<path d="{marks}" stroke="{LINE_STRONG}" fill="none"/>')
+
+    # The aurora along the horizon; a ramp fades its top out into the open sky,
+    # and palette index 0 stays transparent so stars show through the dark.
+    cell = 2  # aurora cell in viewBox units; the portfolio hero uses 2px
+    cols, rows = W // cell, 220 // cell
+    ramp = smoothstep(0.0, 0.35, (np.arange(rows) + 0.5) / rows)[:, None]
+    frames = []
+    for n in range(FRAMES):
+        tone = aurora(cols, rows, height=0.30, length=0.9, rays=22,
+                      t=11.0 + n * SECONDS_PER_FRAME * TIME_SCALE)
+        scene = palette_image(ordered_dither(tone * ramp, len(AURORA)), AURORA)
+        frames.append(png_data(scene.resize((scene.width * 2, scene.height * 2), Image.NEAREST),
+                               transparency=0))
+    items.append(((0.0, 440.0, W, 220.0),
+                  "".join(animated_frames(frames, 0, 440, W, 220))))
+
+    # Background stars, denser toward the top; some twinkle in stepped fades.
+    rng = np.random.default_rng(11)
+    labelled = {"col": (318.0, 190.0), "emc2": (548.0, 250.0), "site": (150.0, 382.0),
+                "nexus": (430.0, 366.0), "x": (720.0, 384.0)}
+    insets = {"col": (40, 140, 208, 109), "emc2": (632, 136, 208, 109)}
+    moon = (812.0, 55.0)
+    # Rectangles to keep star-free: screenshot insets, the title block and every
+    # label, blurb and domain line.
+    boxes = list(insets.values()) + [
+        (28, 14, 492, 84),    # title and tagline
+        (296, 142, 48, 28),   # "Col"
+        (570, 216, 66, 28),   # "Emc²"
+        (36, 258, 230, 40),   # Col blurb and domain
+        (628, 256, 206, 38),  # Emc² blurb and domain
+        (150, 398, 148, 22),  # screeen.us.ci
+        (436, 384, 140, 22),  # znsnexus.com
+        (726, 400, 132, 22),  # @screeendev
     ]
-    return svg(w, h, label, body, t.all)
 
+    def crowded(x: float, y: float, clear: float = 12) -> bool:
+        """True when a background star at (x, y) would crowd text, the moon or a star."""
+        if any(a <= x < a + w and b <= y < b + h for a, b, w, h in boxes):
+            return True
+        if (x - moon[0]) ** 2 + (y - moon[1]) ** 2 < 46 * 46:
+            return True
+        return any((x - sx) ** 2 + (y - sy) ** 2 < clear * clear for sx, sy in labelled.values())
 
-# ---------------------------------------------------------------- project tiles
+    edges = (("col", "emc2"), ("emc2", "nexus"), ("col", "nexus"),
+             ("nexus", "site"), ("emc2", "x"))
+    ends = []
+    for a, b in edges:
+        (x1, y1), (x2, y2) = labelled[a], labelled[b]
+        dx, dy = x2 - x1, y2 - y1
+        length = math.hypot(dx, dy)
+        ends += [(x1 + dx / length * 12, y1 + dy / length * 12),
+                 (x2 - dx / length * 12, y2 - dy / length * 12)]
 
-def tile(image_path: Path, label: str, domain: str, blurb: str) -> str:
-    """Half of an 880 row: a screenshot over a footer with the pixel-font name,
-    a blurb and the domain on the right."""
-    t = Text()
-    cw = W // 2 - GAP  # 432
-    ih = round(cw * 630 / 1200)  # 227
-    with Image.open(image_path) as im:
-        shot = im.convert("RGB").resize((cw * 2, ih * 2), Image.LANCZOS)
-    foot = PAD + ih
-    H = foot + 62 + PAD
-    body = [
-        clip("card", PAD, PAD, cw, ih + 62),
-        card(PAD, PAD, cw, ih + 62, SURFACE),
-        f'<g clip-path="url(#card)">{image(PAD, PAD, cw, ih, jpeg_data(shot), "image/jpeg")}</g>',
-        hline(PAD, PAD + cw, foot),
-        t.px(PAD + 18, foot + 27, label, 20),
-        t(PAD + 18, foot + 47, blurb, 12),
-        t(PAD + cw - 18 - 16, foot + 27, domain, 12, "m", "end"),
-        t(PAD + cw - 18, foot + 27, "↗", 12, "a", "end"),
-        card(PAD, PAD, cw, ih + 62, "none", LINE),
+    n = 320
+    xs, ys = rng.random(n) * W, 560 * rng.random(n) ** 1.4
+    sizes = rng.choice([1, 2, 3], n, p=[0.6, 0.32, 0.08])
+    tones = rng.choice(["#0E4F80", MUTED, SECOND, "#FFFFFF"], n, p=[0.34, 0.28, 0.26, 0.12])
+    durs = 2.4 + rng.random(n) * 1.6
+    dels = -rng.random(n) * 4
+    kept = [(round(float(xs[i])), round(float(ys[i])), int(sizes[i]), tones[i], i)
+            for i in range(n) if not crowded(round(float(xs[i])), round(float(ys[i])))]
+    twinkling = set(rng.choice(len(kept), 30, replace=False).tolist())
+    parts = []
+    for j, (x, y, s, c, i) in enumerate(kept):
+        tw = (f' class="twinkle" style="animation-duration:{durs[i]:.1f}s;'
+              f'animation-delay:{dels[i]:.1f}s"') if j in twinkling else ""
+        parts.append(f'<rect x="{x}" y="{y}" width="{s}" height="{s}" fill="{c}"{tw}/>')
+    light("".join(parts))
+
+    # Nine brighter sparkle stars, kept well clear of the constellation's ends.
+    spark = []
+    while len(spark) < 9:
+        x, y = round(float(rng.random() * W)), round(20 + float(rng.random() * 400))
+        if crowded(x, y, 30):
+            continue
+        if any((x - ex) ** 2 + (y - ey) ** 2 < 900 for ex, ey in ends):
+            continue
+        spark.append((x, y))
+    spark_tw = set(rng.choice(9, 4, replace=False).tolist())
+    parts = []
+    for j, (x, y) in enumerate(spark):
+        tw = (f' class="twinkle" style="animation-duration:{durs[j]:.1f}s;'
+              f'animation-delay:{dels[j]:.1f}s"') if j in spark_tw else ""
+        parts.append(f'<g{tw}>' + rect(x - 3, y - 0.5, 6, 1, SECOND)
+                     + rect(x - 0.5, y - 3, 1, 6, SECOND)
+                     + rect(x - 1, y - 1, 2, 2, "#FFFFFF") + "</g>")
+    light("".join(parts))
+
+    # Ground silhouette: a stepped skyline over the aurora, capped low enough
+    # that the ground text below always sits on dark.
+    skyline = Noise(23)
+    tops = np.clip(np.round((595 + skyline(np.arange(0, W, 4) * 0.012,
+                                         np.zeros(W // 4)) * 11) / 2) * 2, 584, 606)
+    d = [f"M0 {H}V{tops[0]:g}"]
+    for i in range(1, len(tops)):
+        d.append(f"H{i * 4}V{tops[i]:g}")
+    d.append(f"H{W}V{H}Z")
+    light(f'<path d="{"".join(d)}" fill="{MIDNIGHT}"/>')
+
+    # Constellation edges, trimmed at both ends so they never touch a star.
+    for a, b in edges:
+        (x1, y1), (x2, y2) = labelled[a], labelled[b]
+        dx, dy = x2 - x1, y2 - y1
+        length = math.hypot(dx, dy)
+        ux, uy = dx / length, dy / length
+        light(f'<line x1="{x1 + ux * 12:g}" y1="{y1 + uy * 12:g}" '
+              f'x2="{x2 - ux * 12:g}" y2="{y2 - uy * 12:g}" stroke="{LINE_STRONG}"/>')
+
+    # The projects are the bright stars, the links the smaller ones.
+    light(star(*labelled["col"], 26, 11, 6) + star(*labelled["emc2"], 26, 11, 6))
+    light(t.px(318, 166, "Col", 22, anchor="middle"))
+    light(t.px(574, 240, "Emc²", 22))
+    for key in ("site", "nexus", "x"):
+        light(star(*labelled[key], 16, 7, 4))
+
+    # Link labels sit below-right of their star: icon, name, arrow.
+    for icon, ix, baseline, label in (
+            ("globe", 154, 414, "screeen.us.ci"),
+            ("globe", 440, 400, "znsnexus.com"),
+            ("x", 730, 416, "@screeendev")):
+        light(f'<g transform="translate({ix} {baseline - 11}) scale(.5)">'
+              + ICONS[icon].format(c=SECOND) + "</g>"
+              + t(ix + 20, baseline, label, 13, "p")
+              + t(ix + 20 + len(label) * 13 * MONO_ADVANCE, baseline, " ↗", 13, "a"))
+
+    # Screenshot insets in finder frames, tied to their star by a dashed leader.
+    shots = {}
+    for key, path in (("col", "website-col.png"), ("emc2", "website-emc2.png")):
+        with Image.open(ASSETS / path) as im:
+            shots[key] = jpeg_data(im.convert("RGB").resize((416, 218), Image.LANCZOS))
+    for key, (ix, iy), (blurb, domain) in (
+            ("col", (40, 140), ("UI libraries, all in one place", "usecol.com")),
+            ("emc2", (632, 136), ("One inbox for every account", "emclient2.vercel.app"))):
+        iw, ih = insets[key][2:]
+        sx, sy = labelled[key]
+        px_, py_ = min(max(sx, ix), ix + iw), min(max(sy, iy), iy + ih)
+        dx, dy = sx - px_, sy - py_
+        length = math.hypot(dx, dy)
+        items.append(((float(ix), float(iy), float(iw), float(ih)),
+                      f'<g clip-path="url(#{key}shot)">'
+                      + image(ix, iy, iw, ih, shots[key], "image/jpeg") + "</g>"))
+        light(clip(f"{key}shot", ix, iy, iw, ih, rx=6)
+              + card(ix, iy, iw, ih, "none", LINE_STRONG, rx=6)
+              + f'<path d="{brackets(ix, iy, iw, ih)}" stroke="{ACCENT}" fill="none"/>'
+              + f'<line x1="{px_:g}" y1="{py_:g}" x2="{sx - dx / length * 12:g}" '
+                f'y2="{sy - dy / length * 12:g}" stroke="{LINE_STRONG}" stroke-dasharray="2 3"/>')
+        by = iy + ih + 25
+        light(t(ix, by, blurb, 12)
+              + t(ix, by + 19, domain, 12, "m")
+              + t(ix + len(domain) * 12 * MONO_ADVANCE, by + 19, " ↗", 12, "a"))
+
+    # Title top-left, the dithered avatar as the moon top-right.
+    light(t.px(32, 64, "Screen", 56))
+    light(t(34, 90, "Product designer and developer. Working at GitCafe.", 13, "p"))
+    light('<circle cx="812" cy="55" r="60" fill="url(#moonglow)"/>')
+    avatar = dithered_avatar(ASSETS / "avatar.jpg", 36)
+    items.append(((776.0, 19.0, 72.0, 72.0),
+                  '<clipPath id="moon"><circle cx="812" cy="55" r="36"/></clipPath>'
+                  f'<g clip-path="url(#moon)">{image(776, 19, 72, 72, png_data(avatar), "image/png")}</g>'
+                  f'<circle cx="812" cy="55" r="35.5" fill="none" stroke="{LINE_STRONG}"/>'))
+
+    # Blink and twinkle animation, both quiet under prefers-reduced-motion.
+    light('<style>@keyframes building{0%,24%{opacity:1}25%,100%{opacity:.2}}'
+          '@keyframes twinkle{0%,100%{opacity:1}50%{opacity:.15}}'
+          '.building{animation:building 1.2s steps(1,end) infinite}'
+          '.twinkle{animation:twinkle 3s steps(2,end) infinite}'
+          '@media(prefers-reduced-motion:reduce){.building,.twinkle{animation:none}}</style>')
+    light(f'<rect class="building" x="32" y="635" width="6" height="6" fill="{ACCENT}"/>')
+    light(t(48, 642, "Building Col and Emc²", 12, "p w"))
+    light(t(848, 642, "25.3° N 55.4° E  Sharjah", 12, "m", "end"))
+
+    light(card(0, 0, W, H, "none", LINE))
+
+    # Each slice is the same plate seen through its own viewBox window.
+    plates = [
+        ("header.svg", 0.0, 0.0, W, 110.0,
+         "Screen: product designer and developer. Building Col and Emc². Working at GitCafe."),
+        ("tile-col.svg", 0.0, 110.0, 440.0, 220.0,
+         "Col: UI libraries, components and design tools, all in one place. usecol.com"),
+        ("tile-emc2.svg", 440.0, 110.0, 440.0, 220.0,
+         "Emc²: a desktop email client with one inbox for every account"),
+        ("chip-site.svg", 0.0, 330.0, W / 3, 110.0, "screeen.us.ci"),
+        ("chip-nexus.svg", W / 3, 330.0, W / 3, 110.0, "znsnexus.com"),
+        ("chip-x.svg", 2 * W / 3, 330.0, W / 3, 110.0, "@screeendev on X"),
+        ("horizon.svg", 0.0, 440.0, W, 220.0, "Aurora over the horizon. Building Col and Emc²."),
     ]
-    return svg(W // 2, H, f"{label}: {blurb} ({domain})", body, t.all, t.pixels)
+    style = css(t.all, t.pixels)
+    outputs = {}
+    for name, sx, sy, sw, sh, title in plates:
+        body = ['<g clip-path="url(#plate)">']
+        body += [frag for (bx, by, bw, bh), frag in items
+                 if bx < sx + sw and bx + bw > sx and by < sy + sh and by + bh > sy]
+        body.append("</g>")
+        outputs[name] = svg(sw, sh, title, body, style, (sx, sy, sw, sh))
+    return outputs
 
 
 # ---------------------------------------------------------------- repo list
@@ -461,21 +611,12 @@ def repo_list() -> str:
         body.append(rect(W - 16 - lang_w - 14, y + 20, 8, 8, LANG_COLORS[lang]))
         body.append(t(W - 16, y + 28, lang, 12, "", "end"))
     body.append(rect(0, 0, W, H, "none", LINE))
-    return svg(W, H, "More repositories by screen-gd", body, t.all)
+    return svg(W, H, "More repositories by screen-gd", body, css(t.all))
 
 
 def main() -> None:
-    outputs = {
-        "header.svg": header(),
-        "tile-col.svg": tile(ASSETS / "website-col.png", "Col", "usecol.com",
-                             "UI libraries, all in one place"),
-        "tile-emc2.svg": tile(ASSETS / "website-emc2.png", "Emc²", "emclient2.vercel.app",
-                              "One inbox for every account"),
-        "chip-site.svg": chip("globe", "screeen.us.ci"),
-        "chip-nexus.svg": chip("globe", "znsnexus.com"),
-        "chip-x.svg": chip("x", "@screeendev"),
-        "repos.svg": repo_list(),
-    }
+    outputs = star_chart()
+    outputs["repos.svg"] = repo_list()
     for name, content in outputs.items():
         (ASSETS / name).write_text(content, encoding="utf-8")
         print(f"{name}: {len(content.encode()) // 1024} KB")
