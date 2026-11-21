@@ -292,12 +292,14 @@ def intro(th: dict, portrait: str) -> dict[str, str]:
         'class="px" style="fill:#fff">Screen</text></mask>'
         f'<g mask="url(#wm)">'
         f'{image(box_x, top, box_w, box_h + spare, grad, "image/png", "wmd")}</g>')
-    body.append(t(x, baseline + 34, "Product designer and developer", 16, "p"))
-    # GitCafe's mark is a flat purple square beside its lowercase name.
-    body.append(rect(x, baseline + 49, 16, 16, GITCAFE))
-    body.append(t(x + 25, baseline + 63, "gitcafe", 17, "p w"))
-    # Geist Mono advances 0.6em, so the name above is 7 * 17 * 0.6 wide.
-    body.append(t(x + 25 + 7 * 17 * .6, baseline + 63, " · SWE intern", 15))
+    body.append(t(x, baseline + 36, "Product designer and developer", 16, "p"))
+    # GitCafe's mark is a flat purple square beside its lowercase name. Both
+    # lines are 16px; the square sits on whole pixels, centred on the cap height.
+    line = round(baseline + 67)
+    body.append(rect(x, line - 13, 14, 14, GITCAFE))
+    body.append(t(x + 24, line, "gitcafe", 16, "p w"))
+    # Geist Mono advances 0.6em, so the name above is 7 * 16 * 0.6 wide.
+    body.append(t(x + 24 + 7 * 16 * .6, line, " · SWE intern", 16))
 
     steps = spare // cell
     extra = (f'@keyframes wmd{{to{{transform:translateY(-{spare}px)}}}}'
