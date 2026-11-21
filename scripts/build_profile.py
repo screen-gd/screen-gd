@@ -1,14 +1,14 @@
 """Build the profile README panels as SVGs.
 
 GitHub strips CSS from READMEs, so every styled panel is an image. Each SVG embeds
-its fonts (Geist Mono) and bitmaps, so it renders the same everywhere.
+its fonts (Geist Mono, Geist Pixel) and bitmaps, so it renders the same everywhere.
 
-The design is a quiet neofetch-style profile on a transparent background: a
-dithered portrait beside a dotted key/value list, framed project
-screenshots, thin-ruled link rows and labelled rows of tech chips. Every image is
-built twice, dark and light, and the README picks between them with <picture>
-and prefers-color-scheme. The portrait is assets/portrait.png, baked by
-astro-dither through scripts/bake_portrait.py (needs a browser, run manually).
+The design is a quiet profile on a transparent background: a dithered portrait
+tile beside a dither-gradient pixel wordmark, framed project screenshots with
+one-line captions, outlined link buttons and labelled rows of tech chips. Every
+image is built twice, dark and light, and the README picks between them with
+<picture> and prefers-color-scheme. The portrait is assets/portrait.png, baked
+by astro-dither through scripts/bake_portrait.py (needs a browser, run manually).
 
 Usage: python scripts/build_profile.py
 """
@@ -20,11 +20,14 @@ import re
 from pathlib import Path
 from xml.sax.saxutils import escape
 
+import numpy as np
+from fontTools.pens.boundsPen import BoundsPen
 from fontTools.subset import Options, Subsetter
 from fontTools.ttLib import TTFont
+from fontTools.varLib.instancer import instantiateVariableFont
 from PIL import Image
 
-from icons import ICONS
+from icons import GLOBE, ICONS
 
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
@@ -43,12 +46,15 @@ MUTED = "#52606B"
 ACCENT = "#0297DE"
 
 # The new transparent panels: dark for GitHub's dark mode, light for its light
-# one. RULE lines and CHIP fills are ACCENT at per-theme opacities.
+# one. RULE lines and CHIP fills are ACCENT at per-theme opacities; WM is the
+# wordmark's dither palette, darkest colour last.
 THEMES = {
     "dark": {"TEXT": "#E6EDF2", "SECOND": "#8B98A4", "MUTED": "#52606B",
-             "ACCENT": "#0297DE", "RULE": ".28", "CHIP": ".1"},
+             "ACCENT": "#0297DE", "RULE": ".28", "CHIP": ".1",
+             "WM": ["#0E4F80", "#0297DE", "#FFFFFF"]},
     "light": {"TEXT": "#0B1620", "SECOND": "#3A4752", "MUTED": "#6B7884",
-              "ACCENT": "#0969A8", "RULE": ".5", "CHIP": ".14"},
+              "ACCENT": "#0969A8", "RULE": ".5", "CHIP": ".14",
+              "WM": ["#8CC9EC", "#0969A8", "#0B1620"]},
 }
 
 MONO_ADVANCE = 0.6  # Geist Mono advance per em
@@ -71,24 +77,30 @@ def subset(font: TTFont, text: str) -> str:
     return base64.b64encode(buffer.getvalue()).decode()
 
 
-def font_faces(text: str) -> str:
+def font_faces(text: str, pixel_text: str = "") -> str:
     rules = []
     for weight, name in ((400, "GeistMono-Regular.ttf"), (500, "GeistMono-Medium.ttf")):
         data = subset(TTFont(FONTS / name), text)
         rules.append(f"@font-face{{font-family:GM;font-weight:{weight};"
                      f"src:url(data:font/woff2;base64,{data}) format('woff2')}}")
+    if pixel_text:
+        # ELSH 1 is the "Square" cut: each pixel a separate square, like the dither
+        pixel = instantiateVariableFont(TTFont(FONTS / "GeistPixel.ttf"), {"ELSH": 1})
+        data = subset(pixel, pixel_text)
+        rules.append(f"@font-face{{font-family:GP;src:url(data:font/woff2;base64,{data}) format('woff2')}}")
     return "".join(rules)
 
 
-def css(th: dict, text: str, extra: str = "") -> str:
+def css(th: dict, text: str, extra: str = "", pixel_text: str = "") -> str:
     """The <style> content for one themed panel: font subsets, text classes and
     any animation rules the panel needs."""
     return (
-        font_faces(text)
+        font_faces(text, pixel_text)
         + f"text{{font-family:GM,'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;"
         f"fill:{th['SECOND']};white-space:pre}}"
         f".p{{fill:{th['TEXT']}}}.m{{fill:{th['MUTED']}}}.a{{fill:{th['ACCENT']}}}.w{{font-weight:500}}"
-        "image{image-rendering:pixelated}" + extra
+        + (".px{font-family:GP,'Geist Pixel','Geist Mono',monospace}" if pixel_text else "")
+        + "image{image-rendering:pixelated}" + extra
     )
 
 
@@ -160,41 +172,6 @@ def rule_rect(x: float, y: float, w: float, h: float, th: dict, rx: float = 8) -
             f'rx="{rx:g}" fill="none" stroke="{th["ACCENT"]}" stroke-opacity="{th["RULE"]}"/>')
 
 
-def kv(t: Text, th: dict, x0: float, x1: float, y: float, key: str, value: str,
-       s: int = 13, accent: bool = False, arrow: bool = False, tail: int = 0) -> str:
-    """One neofetch row on a character grid: a MUTED bullet at x0, the SECOND key
-    two characters in, a dotted leader with a blank on each side, then the value
-    right-aligned at x1 in TEXT (or ACCENT when flagged). `tail` reserves extra
-    characters before the value, `arrow` appends an ACCENT ` ↗` after it."""
-    adv = s * MONO_ADVANCE
-    cols = int((x1 - x0) / adv)
-    ks = 2 + len(key)
-    vs = cols - len(value) - tail - (2 if arrow else 0)
-    parts = [t(x0, y, ".", s, "m"), t(x0 + 2 * adv, y, key, s)]
-    dots = "." * max(vs - ks - 2, 0)
-    if dots:
-        parts.append(t(x0 + (ks + 1) * adv, y, dots, s, "m"))
-    cls = "a" if accent else "p"
-    if arrow:
-        parts += [t(x1 - 2 * adv, y, value, s, cls, "end"),
-                  t(x1, y, " ↗", s, "a", "end")]
-    else:
-        parts.append(t(x1, y, value, s, cls, "end"))
-    return "".join(parts)
-
-
-def head(t: Text, th: dict, x0: float, x1: float, y: float, name: str, s: int = 13,
-         arrow: bool = False) -> str:
-    """`name@host` in ACCENT weight 500 at x0, then a RULE line from 10 units
-    after the text to x1 (or 16 units short of an optional trailing arrow)."""
-    end = x1 - 16 if arrow else x1
-    parts = [t(x0, y, name, s, "a w"),
-             rule(x0 + len(name) * s * MONO_ADVANCE + 10, end, y - 4, th)]
-    if arrow:
-        parts.append(t(x1, y, "↗", s, "a", "end"))
-    return "".join(parts)
-
-
 def window_bar(t: Text, x: float, y: float, w: float, index: str, label: str, note: str = "",
                fill: str = SURFACE, line: str = LINE) -> list[str]:
     """A tmux-style title bar: index, name and a muted note on the right."""
@@ -214,72 +191,140 @@ def jpeg_data(img: Image.Image) -> str:
     return base64.b64encode(buffer.getvalue()).decode()
 
 
-def image(x: float, y: float, w: float, h: float, data: str, mime: str) -> str:
+def image(x: float, y: float, w: float, h: float, data: str, mime: str,
+          cls: str = "") -> str:
     uri = f"data:{mime};base64,{data}"
+    c = f' class="{cls}"' if cls else ""
     return (f'<image x="{x:g}" y="{y:g}" width="{w:g}" height="{h:g}" '
-            f'preserveAspectRatio="xMidYMid slice" href="{uri}" xlink:href="{uri}"/>')
+            f'preserveAspectRatio="xMidYMid slice" href="{uri}" xlink:href="{uri}"{c}/>')
+
+
+# ---------------------------------------------------------------- dither
+
+BAYER8 = np.array([
+    [0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26],
+    [12, 44, 4, 36, 14, 46, 6, 38], [60, 28, 52, 20, 62, 30, 54, 22],
+    [3, 35, 11, 43, 1, 33, 9, 41], [51, 19, 59, 27, 49, 17, 57, 25],
+    [15, 47, 7, 39, 13, 45, 5, 37], [63, 31, 55, 23, 61, 29, 53, 21],
+]) / 64 + 1 / 128
+
+
+def dither_gradient(w: int, h: int, box_h: int, colors: list[str], cell: int = 2) -> str:
+    """A vertical ordered-dither gradient PNG for the wordmark mask: solid top
+    colour over the top 55% of the visible box, thinning to sparse dots at its
+    foot and empty below it. Palette index 0 is transparent."""
+    gw, gh = w // cell, h // cell
+    v = np.linspace(0, h / box_h, gh)[:, None]  # position in box heights
+    tone = np.clip(1 - (v - 0.55) / 0.45 * 0.7, 0, 1)
+    thr = np.tile(BAYER8, (gh // 8 + 1, gw // 8 + 1))[:gh, :gw]
+    idx = np.clip(np.floor(tone * 3 + thr), 0, 3).astype(np.uint8)
+    img = Image.fromarray(idx, "P")
+    flat = []
+    for c in ["#000000"] + colors:
+        flat += [int(c[i:i + 2], 16) for i in (1, 3, 5)]
+    img.putpalette(flat)
+    img = img.resize((gw * cell, gh * cell), Image.NEAREST)
+    buffer = io.BytesIO()
+    img.save(buffer, "PNG", optimize=True, transparency=0)
+    return base64.b64encode(buffer.getvalue()).decode()
 
 
 # ---------------------------------------------------------------- profile blocks
 
+def wordmark_box(text: str, size: int) -> tuple[float, float, float]:
+    """Advance width and ink extents (below, above the baseline) of `text` in
+    the Square cut of Geist Pixel, measured from the actual outlines."""
+    font = instantiateVariableFont(TTFont(FONTS / "GeistPixel.ttf"), {"ELSH": 1})
+    cmap, hmtx, gs = font.getBestCmap(), font["hmtx"], font.getGlyphSet()
+    scale = size / font["head"].unitsPerEm
+    width = sum(hmtx[cmap[ord(c)]][0] for c in text) * scale
+    pen = BoundsPen(gs)
+    for c in text:
+        gs[cmap[ord(c)]].draw(pen)
+    return width, pen.bounds[1] * scale, pen.bounds[3] * scale
+
+
 def intro(th: dict, portrait: str) -> str:
     """The top block: the baked portrait as an opaque RULE-framed tile on the
-    left, a neofetch info list on the right."""
+    left; on the right a pixel wordmark filled with an animated ordered-dither
+    gradient, a role line, a meta line and a blinking status chip."""
     t = Text()
     body = [clip("av", 6, 16, 288, 288, rx=10),
             f'<g clip-path="url(#av)">{image(6, 16, 288, 288, portrait, "image/png")}</g>',
             rule_rect(6, 16, 288, 288, th, rx=10)]
 
-    x0, x1, s, pitch = 336, 874, 13, 26
-    body.append(head(t, th, x0, x1, 46, "screen@github", s))
-    rows = [("Name:", "Screen", False),
-            ("Role:", "Product designer and developer", False),
-            ("Working at:", "GitCafe", True),
-            ("Building:", "Col · Emc²", True),
-            ("Also:", "game dev", False),
-            ("Based in:", "Sharjah, UAE", False),
-            ("Languages:", "TypeScript · JavaScript · Python", False),
-            ("Fuel:", "caffeine", False)]
-    for i, (key, value, accent) in enumerate(rows):
-        body.append(kv(t, th, x0, x1, 72 + i * pitch, key, value, s, accent))
-    y = 72 + 8 * pitch
-    body.append(kv(t, th, x0, x1, y, "Status:", "building", s, True, tail=2))
-    sq = x1 - len("building") * s * MONO_ADVANCE - 14
-    body.append(f'<rect class="blink" x="{sq:g}" y="{y - 8:g}" width="6" height="6" '
+    x, baseline = 336, 128
+    size = 124
+    wm_w, wm_bot, wm_top = wordmark_box("Screen", size)
+    if wm_w > 874 - x:
+        size = int(size * (874 - x) / wm_w)
+        wm_w, wm_bot, wm_top = wordmark_box("Screen", size)
+    cell = 2
+    top = int(round(baseline - wm_top))
+    box_w = int(np.ceil(wm_w / cell)) * cell
+    box_h = int(np.ceil((baseline - wm_bot - top) / cell)) * cell
+    spare = int(round(0.4 * box_h / cell)) * cell
+    grad = dither_gradient(box_w, box_h + spare, box_h, th["WM"], cell)
+    body.append(
+        f'<mask id="wm" maskUnits="userSpaceOnUse" x="{x}" y="{top}" '
+        f'width="{box_w}" height="{box_h}">'
+        f'<text x="{x}" y="{baseline}" font-size="{size}" class="px" '
+        'style="fill:#fff">Screen</text></mask>'
+        f'<g mask="url(#wm)">'
+        f'{image(x, top, box_w, box_h + spare, grad, "image/png", "wmd")}</g>')
+    body.append(t(x, 176, "Product designer and developer", 16, "p"))
+    body.append(t(x, 202, "GitCafe  ·  Sharjah, UAE", 13))
+
+    label = "Building Col and Emc²"
+    cw = 12 + 6 + 8 + len(label) * 12 * MONO_ADVANCE + 12
+    body.append(f'<rect x="{x}" y="274" width="{cw:g}" height="30" rx="8" '
+                f'fill="{th["ACCENT"]}" fill-opacity="{th["CHIP"]}"/>'
+                f'<rect class="blink" x="{x + 12}" y="286" width="6" height="6" '
                 f'fill="{th["ACCENT"]}"/>')
+    body.append(t(x + 26, 293.5, label, 12, "p w"))
 
-    extra = ('@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:.2}}'
+    steps = spare // cell
+    extra = (f'@keyframes wmd{{to{{transform:translateY(-{spare}px)}}}}'
+             f'.wmd{{animation:wmd 7s steps({steps}) infinite alternate}}'
+             '@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:.2}}'
              '.blink{animation:blink 1.2s steps(1,end) infinite}'
-             '@media(prefers-reduced-motion:reduce){.blink{animation:none}}')
+             '@media(prefers-reduced-motion:reduce){.wmd,.blink{animation:none}}')
     return svg(W, 320, "Screen: product designer and developer. Building Col and Emc². "
-                       "Working at GitCafe.", body, css(th, t.all, extra))
+                       "Working at GitCafe.", body, css(th, t.all, extra, "Screen"))
 
 
-def project(image_path: Path, th: dict, name: str, rows: list[tuple[str, str]],
-            title: str) -> str:
-    """Half-width block: a RULE-framed screenshot over a header and three rows."""
+def project(image_path: Path, th: dict, name: str, caption: str, title: str) -> str:
+    """Half-width block: a RULE-framed screenshot over a one-line caption."""
     t = Text()
     iw, ih = 428, 225
     with Image.open(image_path) as im:
         shot = jpeg_data(im.convert("RGB").resize((iw * 2, ih * 2), Image.LANCZOS))
-    x0, x1, s, pitch = 6, 434, 12, 24
-    top = 20 + ih
+    y = 20 + ih + 28
     body = [clip("shot", 6, 20, iw, ih),
             f'<g clip-path="url(#shot)">{image(6, 20, iw, ih, shot, "image/jpeg")}</g>',
             rule_rect(6, 20, iw, ih, th),
-            head(t, th, x0, x1, top + 30, name, s, arrow=True)]
-    for i, (key, value) in enumerate(rows):
-        body.append(kv(t, th, x0, x1, top + 30 + (i + 1) * pitch, key, value, s))
-    return svg(W // 2, top + 30 + 3 * pitch + 10, title, body, css(th, t.all))
+            t(6, y, name, 14, "p w"),
+            t(6 + len(name) * 14 * MONO_ADVANCE + 12, y, caption, 12),
+            t(434, y, "↗", 13, "a", "end")]
+    return svg(W // 2, y + 12, title, body, css(th, t.all))
 
 
-def link_row(th: dict, key: str, value: str, title: str) -> str:
-    """A third-width block: a RULE line on top, then one dotted key/value row."""
+def link_btn(th: dict, label: str, icon: str, title: str) -> str:
+    """A third-width block: one outlined button with an icon, the handle and a
+    trailing arrow."""
     t = Text()
     w = W / 3
-    body = [rule(6, w - 6, 16, th),
-            kv(t, th, 6, w - 6, 42, key, value, 13, arrow=True)]
-    return svg(w, 60, title, body, css(th, t.all))
+    icon_markup = (f'<g transform="translate(20 21) scale({14 / 24})" stroke="{th["ACCENT"]}">'
+                   f'{GLOBE}</g>' if icon == "globe" else
+                   f'<g transform="translate(20 21) scale({14 / 24})">'
+                   f'<path fill="{th["ACCENT"]}" d="{ICONS[icon]}"/></g>')
+    body = [f'<rect x="6.5" y="8.5" width="{w - 13:g}" height="39" rx="8" '
+            f'fill="{th["ACCENT"]}" fill-opacity="{th["CHIP"]}" '
+            f'stroke="{th["ACCENT"]}" stroke-opacity="{th["RULE"]}"/>',
+            icon_markup,
+            t(44, 32.5, label, 13, "p"),
+            t(w - 20, 32.5, "↗", 13, "a", "end")]
+    return svg(w, 56, title, body, css(th, t.all))
 
 
 def stack(th: dict) -> str:
@@ -320,19 +365,15 @@ def build(th: dict, portrait: str) -> dict[str, str]:
     """The seven README blocks for one theme; the portrait PNG is shared."""
     return {
         "intro": intro(th, portrait),
-        "project-col": project(ASSETS / "website-col.png", th, "col@usecol.com",
-                               [("What:", "UI libraries, components and design tools"),
-                                ("Kind:", "community directory"),
-                                ("Stack:", "TypeScript · React · TanStack Start")],
+        "project-col": project(ASSETS / "website-col.png", th, "Col",
+                               "UI libraries, all in one place",
                                "Col: UI libraries, components and design tools, all in one place. usecol.com"),
-        "project-emc2": project(ASSETS / "website-emc2.png", th, "emc2@emclient2.vercel.app",
-                                [("What:", "Desktop email, one inbox for every account"),
-                                 ("Runs on:", "Windows · macOS · Linux"),
-                                 ("Stack:", "TypeScript · Electron · React")],
+        "project-emc2": project(ASSETS / "website-emc2.png", th, "Emc²",
+                                "One inbox for every account",
                                 "Emc²: a desktop email client with one inbox for every account"),
-        "link-site": link_row(th, "Site:", "screeen.us.ci", "screeen.us.ci"),
-        "link-nexus": link_row(th, "Nexus:", "znsnexus.com", "znsnexus.com"),
-        "link-x": link_row(th, "X:", "@screeendev", "@screeendev on X"),
+        "link-site": link_btn(th, "screeen.us.ci", "globe", "screeen.us.ci"),
+        "link-nexus": link_btn(th, "znsnexus.com", "globe", "znsnexus.com"),
+        "link-x": link_btn(th, "@screeendev", "X", "@screeendev on X"),
         "stack": stack(th),
     }
 
