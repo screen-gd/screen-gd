@@ -296,6 +296,8 @@ def intro(th: dict, portrait: str) -> dict[str, str]:
     # GitCafe's mark is a flat purple square beside its lowercase name.
     body.append(rect(x, baseline + 49, 16, 16, GITCAFE))
     body.append(t(x + 25, baseline + 63, "gitcafe", 17, "p w"))
+    # Geist Mono advances 0.6em, so the name above is 7 * 17 * 0.6 wide.
+    body.append(t(x + 25 + 7 * 17 * .6, baseline + 63, " · SWE intern", 15))
 
     steps = spare // cell
     extra = (f'@keyframes wmd{{to{{transform:translateY(-{spare}px)}}}}'
