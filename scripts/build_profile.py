@@ -85,10 +85,10 @@ def font_faces(text: str, pixel_text: str = "") -> str:
         rules.append(f"@font-face{{font-family:GM;font-weight:{weight};"
                      f"src:url(data:font/woff2;base64,{data}) format('woff2')}}")
     if pixel_text:
-        # The wordmark face: DM Sans variable instantiated at Bold.
-        dm = instantiateVariableFont(TTFont(FONTS / "DMSans-Variable.woff2"), {"wght": 700})
-        data = subset(dm, pixel_text)
-        rules.append(f"@font-face{{font-family:DM;src:url(data:font/woff2;base64,{data}) format('woff2')}}")
+        # ELSH 1 is the "Square" cut: each pixel a separate square, like the dither.
+        pixel = instantiateVariableFont(TTFont(FONTS / "GeistPixel.ttf"), {"ELSH": 1})
+        data = subset(pixel, pixel_text)
+        rules.append(f"@font-face{{font-family:GP;src:url(data:font/woff2;base64,{data}) format('woff2')}}")
     return "".join(rules)
 
 
@@ -100,7 +100,7 @@ def css(th: dict, text: str, extra: str = "", pixel_text: str = "") -> str:
         + f"text{{font-family:GM,'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;"
         f"fill:{th['SECOND']};white-space:pre}}"
         f".p{{fill:{th['TEXT']}}}.m{{fill:{th['MUTED']}}}.a{{fill:{th['ACCENT']}}}.w{{font-weight:500}}"
-        + (".px{font-family:DM,'DM Sans',sans-serif}" if pixel_text else "")
+        + (".px{font-family:GP,'Geist Pixel','Geist Mono',monospace}" if pixel_text else "")
         + "image{image-rendering:pixelated}" + extra
     )
 
@@ -241,18 +241,18 @@ def dither_gradient(w: int, h: int, box_h: int, colors: list[str], cell: int = 2
 
 # ---------------------------------------------------------------- profile blocks
 
-def wordmark_box(text: str, ls_em: float = -0.04) -> tuple[float, float, float, float]:
-    """Ink bounds of `text` in DM Sans Bold with letter-spacing, in font units:
-    (left, bottom, right, top) relative to the pen origin and baseline."""
-    font = instantiateVariableFont(TTFont(FONTS / "DMSans-Variable.woff2"), {"wght": 700})
+def wordmark_box(text: str) -> tuple[tuple[float, float, float, float], int]:
+    """Ink bounds of `text` in the Square cut of Geist Pixel, measured from the
+    actual outlines: ((left, bottom, right, top) in font units relative to the
+    pen origin and baseline, unitsPerEm)."""
+    font = instantiateVariableFont(TTFont(FONTS / "GeistPixel.ttf"), {"ELSH": 1})
     cmap, hmtx, gs = font.getBestCmap(), font["hmtx"], font.getGlyphSet()
-    upm = font["head"].unitsPerEm
     pen = BoundsPen(gs)
     pos = 0.0
     for c in text:
         gs[cmap[ord(c)]].draw(TransformPen(pen, (1, 0, 0, 1, pos, 0)))
-        pos += hmtx[cmap[ord(c)]][0] + ls_em * upm
-    return pen.bounds
+        pos += hmtx[cmap[ord(c)]][0]
+    return pen.bounds, font["head"].unitsPerEm
 
 
 def portrait_tile(th: dict, portrait: str) -> list[str]:
@@ -265,29 +265,30 @@ def portrait_tile(th: dict, portrait: str) -> list[str]:
 
 def intro(th: dict, portrait: str) -> dict[str, str]:
     """The master top block cut into the `intro` and `portrait-foot` slices:
-    the portrait tile on the left; on the right a DM Sans wordmark filled with
+    the portrait tile on the left; on the right a pixel wordmark filled with
     an animated ordered-dither gradient, a role line and a meta line. The three
     link images sit beside portrait-foot, so the portrait is cut at y=264."""
     t = Text()
     body = portrait_tile(th, portrait)
 
-    # Wordmark: largest size whose ink fits 500 units, S top at y=16.
-    lx, ly, rx, ry = wordmark_box("Screen")
-    upm = 1000
+    # Wordmark: largest size whose ink fits 500 units, S top at y=16. The mask
+    # and the dither image keep a >=6-unit margin around the ink box at every
+    # point of the breathing animation, so no glyph edge is clipped.
+    (lx, ly, rx, ry), upm = wordmark_box("Screen")
     size = int(500 / (rx - lx) * upm * 10) / 10
     x, baseline = 336, 16 + ry / upm * size
-    cell = 2
-    top = int(round(16))
-    box_x = int(np.floor((x + lx / upm * size) / cell)) * cell
-    box_w = int(np.ceil((x + rx / upm * size - box_x) / cell)) * cell
-    box_h = int(np.ceil((baseline - ly / upm * size - top) / cell)) * cell
+    cell, margin = 2, 6
+    box_x = int(np.floor((x - margin) / cell)) * cell
+    box_w = int(np.ceil((x + (rx - lx) / upm * size + margin) / cell)) * cell - box_x
+    top = int(np.floor((16 - margin) / cell)) * cell
+    box_h = int(np.ceil((baseline - ly / upm * size + margin) / cell)) * cell - top
     spare = int(round(0.4 * box_h / cell)) * cell
     grad = dither_gradient(box_w, box_h + spare, box_h, th["WM"], cell)
     body.append(
         f'<mask id="wm" maskUnits="userSpaceOnUse" x="{box_x}" y="{top}" '
         f'width="{box_w}" height="{box_h}">'
         f'<text x="{x - lx / upm * size:g}" y="{baseline:g}" font-size="{size:g}" '
-        'letter-spacing="-0.04em" class="px" style="fill:#fff">Screen</text></mask>'
+        'class="px" style="fill:#fff">Screen</text></mask>'
         f'<g mask="url(#wm)">'
         f'{image(box_x, top, box_w, box_h + spare, grad, "image/png", "wmd")}</g>')
     body.append(t(x, baseline + 34, "Product designer and developer", 16, "p"))
