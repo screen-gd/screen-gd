@@ -45,6 +45,7 @@ TEXT = "#E6EDF2"
 SECOND = "#8B98A4"
 MUTED = "#52606B"
 ACCENT = "#0297DE"
+GITCAFE = "#A78BFA"
 
 # The new transparent panels: dark for GitHub's dark mode, light for its light
 # one. RULE lines and CHIP fills are ACCENT at per-theme opacities; WM is the
@@ -292,7 +293,9 @@ def intro(th: dict, portrait: str) -> dict[str, str]:
         f'<g mask="url(#wm)">'
         f'{image(box_x, top, box_w, box_h + spare, grad, "image/png", "wmd")}</g>')
     body.append(t(x, baseline + 34, "Product designer and developer", 16, "p"))
-    body.append(t(x, baseline + 60, "GitCafe  ·  Sharjah, UAE", 13))
+    # GitCafe's mark is a flat purple square beside its lowercase name.
+    body.append(rect(x, baseline + 49, 16, 16, GITCAFE))
+    body.append(t(x + 25, baseline + 63, "gitcafe", 17, "p w"))
 
     steps = spare // cell
     extra = (f'@keyframes wmd{{to{{transform:translateY(-{spare}px)}}}}'
