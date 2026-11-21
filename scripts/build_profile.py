@@ -3,6 +3,11 @@
 GitHub strips CSS from READMEs, so every styled panel is an image. Each SVG embeds
 its fonts (Geist Mono, Geist Pixel) and bitmaps, so it renders the same everywhere.
 
+The layout is a bento grid of rounded cards on a transparent background: a wide
+header with an animated aurora, two project tiles, then three link chips. Every
+SVG keeps a transparent PAD margin around its card, so images that touch still
+show an even GAP gutter.
+
 The header's aurora is a NumPy port of the dithercn Aurora used on screeen.us.ci:
 curtains of light from layered noise, quantised to a five-colour palette with an
 8x8 Bayer matrix.
@@ -29,6 +34,12 @@ FONTS = ROOT / "fonts"
 
 # Panels are drawn at 880 units, close to GitHub's README column, so 14 stays ~14px.
 W = 880
+
+# Bento geometry: GAP between cards, PAD of transparent margin baked into every
+# SVG so touching images produce an even gutter, RADIUS for the card corners.
+GAP = 8
+PAD = GAP // 2
+RADIUS = 14
 
 # One neutral ramp tinted toward the portfolio's midnight, plus electric blue.
 MIDNIGHT = "#02070A"
@@ -75,18 +86,21 @@ def font_faces(text: str, pixel_text: str) -> str:
     return "".join(rules)
 
 
-def svg(width: int, height: int, title: str, body: list[str], text: str, pixel_text: str = "") -> str:
+def svg(width: float, height: float, title: str, body: list[str], text: str,
+        pixel_text: str = "") -> str:
     style = (
         font_faces(text, pixel_text)
         + f"text{{font-family:GM,'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;"
         f"fill:{SECOND};white-space:pre}}"
         f".p{{fill:{TEXT}}}.m{{fill:{MUTED}}}.a{{fill:{ACCENT}}}.w{{font-weight:500}}"
-        f".px{{font-family:GP,'Geist Pixel','Geist Mono',monospace;fill:{TEXT}}}"
+        # GM sits before the system names so glyphs missing from Geist Pixel
+        # fall back per glyph to the embedded mono.
+        f".px{{font-family:GP,GM,'Geist Pixel','Geist Mono',monospace;fill:{TEXT}}}"
         "image{image-rendering:pixelated}"
     )
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
-        f'width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img">'
+        f'width="{width:g}" height="{height:g}" viewBox="0 0 {width:g} {height:g}" role="img">'
         f"<title>{escape(title)}</title><style>{style}</style>{''.join(body)}</svg>\n"
     )
 
@@ -96,6 +110,7 @@ class Text:
 
     def __init__(self) -> None:
         self.seen: list[str] = []
+        self.pixel_seen: list[str] = []
 
     def __call__(self, x: float, y: float, content: str, size: int = 14, cls: str = "",
                  anchor: str = "start") -> str:
@@ -104,9 +119,20 @@ class Text:
         a = f' text-anchor="{anchor}"' if anchor != "start" else ""
         return f'<text x="{x:g}" y="{y:g}" font-size="{size}"{c}{a} xml:space="preserve">{escape(content)}</text>'
 
+    def px(self, x: float, y: float, content: str, size: int, cls: str = "",
+           anchor: str = "start") -> str:
+        """Pixel-font text. The string also joins the mono subset, which supplies
+        any glyphs Geist Pixel lacks through per-glyph fallback."""
+        self.pixel_seen.append(content)
+        return self(x, y, content, size, "px" + (f" {cls}" if cls else ""), anchor)
+
     @property
     def all(self) -> str:
         return "".join(self.seen)
+
+    @property
+    def pixels(self) -> str:
+        return "".join(self.pixel_seen)
 
 
 def rect(x: float, y: float, w: float, h: float, fill: str = "none", stroke: str = "") -> str:
@@ -114,6 +140,21 @@ def rect(x: float, y: float, w: float, h: float, fill: str = "none", stroke: str
         return (f'<rect x="{x + .5:g}" y="{y + .5:g}" width="{w - 1:g}" height="{h - 1:g}" '
                 f'fill="{fill}" stroke="{stroke}"/>')
     return f'<rect x="{x:g}" y="{y:g}" width="{w:g}" height="{h:g}" fill="{fill}"/>'
+
+
+def card(x: float, y: float, w: float, h: float, fill: str, stroke: str = "",
+         rx: float = RADIUS) -> str:
+    """A rounded card rect; the stroked variant insets by .5 like rect."""
+    if stroke:
+        return (f'<rect x="{x + .5:g}" y="{y + .5:g}" width="{w - 1:g}" height="{h - 1:g}" '
+                f'rx="{rx:g}" fill="{fill}" stroke="{stroke}"/>')
+    return f'<rect x="{x:g}" y="{y:g}" width="{w:g}" height="{h:g}" rx="{rx:g}" fill="{fill}"/>'
+
+
+def clip(clip_id: str, x: float, y: float, w: float, h: float, rx: float = RADIUS) -> str:
+    """A rounded-rect clipPath. Ids only need to be unique within each SVG file."""
+    return (f'<clipPath id="{clip_id}"><rect x="{x:g}" y="{y:g}" width="{w:g}" height="{h:g}" '
+            f'rx="{rx:g}"/></clipPath>')
 
 
 def hline(x1: float, x2: float, y: float, color: str = LINE) -> str:
@@ -274,6 +315,7 @@ def animated_frames(frames: list[str], x: float, y: float, w: float, h: float) -
         )
     return parts
 
+
 def dithered_avatar(path: Path, cells: int) -> Image.Image:
     with Image.open(path) as im:
         gray = im.convert("L")
@@ -286,63 +328,57 @@ def dithered_avatar(path: Path, cells: int) -> Image.Image:
 
 
 def header() -> str:
+    """The top card: an animated aurora over MIDNIGHT, fading to dark at the
+    bottom where the avatar, name, tagline and a status pill sit."""
     t = Text()
-    strip, scene_h, details_h = 28, 140, 198
-    H = strip + scene_h + details_h
+    H = 300
+    cw, ch = W - GAP, H - GAP  # the card inside the PAD margin
     cell = 2  # aurora cell in viewBox units; the portfolio hero uses 2px
     frames = []
     for n in range(FRAMES):
-        tone = aurora(W // cell, scene_h // cell, height=0.38, length=0.85, rays=12,
+        tone = aurora(cw // cell, ch // cell, height=0.44, length=0.9, rays=22,
                       t=11.0 + n * SECONDS_PER_FRAME * TIME_SCALE)
         scene = palette_image(ordered_dither(tone, len(AURORA)), AURORA)
         frames.append(png_data(scene.resize((scene.width * 2, scene.height * 2), Image.NEAREST)))
 
+    # The aurora fills the card; a gradient settles the bottom so text stays legible.
     body = [
-        rect(0, 0, W, H, MIDNIGHT),
-        rect(0, 0, W, strip, SURFACE),
-        t(12, 19, "Screen", 12, "p w"),
-        t(100, 19, "BUILDING", 12, "p w"),
-        t(W - 12, 19, "github.com/screen-gd", 12, "m", "end"),
-        *animated_frames(frames, 0, strip, W, scene_h),
-        hline(0, W, strip - 1),
+        clip("hero", PAD, PAD, cw, ch),
+        card(PAD, PAD, cw, ch, MIDNIGHT),
+        '<linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">'
+        f'<stop offset="0" stop-color="{MIDNIGHT}" stop-opacity="0"/>'
+        f'<stop offset=".45" stop-color="{MIDNIGHT}" stop-opacity="0"/>'
+        f'<stop offset="1" stop-color="{MIDNIGHT}" stop-opacity=".9"/></linearGradient>',
+        f'<g clip-path="url(#hero)">{"".join(animated_frames(frames, PAD, PAD, cw, ch))}'
+        f'<rect x="{PAD}" y="{PAD}" width="{cw}" height="{ch}" fill="url(#fade)"/></g>',
     ]
 
-    # Four pixels cycle clockwise to mark ongoing building, with a static fallback.
+    # The dithered avatar, name, tagline and status pill sit along the bottom.
+    ax, ay = PAD + 28, PAD + ch - 28 - 72
+    avatar = dithered_avatar(ASSETS / "avatar.jpg", 36)
+    body.append(clip("face", ax, ay, 72, 72, rx=10))
+    body.append(f'<g clip-path="url(#face)">{image(ax, ay, 72, 72, png_data(avatar), "image/png")}</g>')
+    body.append(card(ax, ay, 72, 72, "none", LINE_STRONG, rx=10))
+    nx = ax + 72 + 18
+    body.append(t.px(nx, ay + 46, "Screen", 56))
+    body.append(t(nx, ay + 72 - 4, "Product designer and developer. Working at GitCafe.", 13, "p"))
+
+    # A blinking square marks ongoing building, with a static fallback.
     body.append('<style>@keyframes building{0%,24%{opacity:1}25%,100%{opacity:.2}}'
                 '.building{animation:building 1.2s steps(1,end) infinite}'
                 '@media(prefers-reduced-motion:reduce){.building{animation:none}}</style>')
-    for step, (x, y) in enumerate(((79, 10), (85, 10), (85, 16), (79, 16))):
-        body.append(f'<rect class="building" x="{x}" y="{y}" width="4" height="4" '
-                    f'fill="{ACCENT}" style="animation-delay:-{(4-step)*.3:g}s"/>')
+    label = "Building Col and Emc²"
+    pw = 14 + 6 + 10 + len(label) * 12 * MONO_ADVANCE + 14
+    px0, py0 = PAD + cw - 28 - pw, ay + 72 - 30
+    body.append(f'<rect x="{px0 + .5:g}" y="{py0 + .5:g}" width="{pw - 1:g}" height="29" rx="15" '
+                f'fill="{SURFACE}" fill-opacity=".85" stroke="{LINE_STRONG}"/>')
+    body.append(f'<rect class="building" x="{px0 + 14:g}" y="{py0 + 12:g}" width="6" height="6" '
+                f'fill="{ACCENT}"/>')
+    body.append(t(px0 + 30, py0 + 19.5, label, 12, "p w"))
 
-    # The banner sits above a name panel and a two-by-two details grid.
-    top = strip + scene_h
-    split, middle = 536, 708
-    body += [rect(0, top, W, details_h, MIDNIGHT), hline(0, W, top)]
-    body.append(f'<text x="24" y="{top + 62}" font-size="54" '
-                f'style="font-family:Arial,Helvetica,sans-serif;letter-spacing:-2px" '
-                f'class="p">Screen</text>')
-    body.append(t(24, top + 90, "Product designer and developer.", 14, "p"))
-    for n, (label, value) in enumerate((("NOW", "building Col and Emc²"),
-                                       ("HANDLE", "@screen-gd"))):
-        y = top + 136 + n * 28
-        body.append(t(24, y, label, 11, "m"))
-        body.append(t(104, y, value, 13, "p w"))
-    for x in (split, middle):
-        body.append(f'<line x1="{x + .5}" y1="{top}" x2="{x + .5}" y2="{H}" stroke="{LINE}"/>')
-    body.append(hline(split, W, top + details_h // 2))
-    for x, y, label, value in (
-        (split, top, "Working at", "GitCafe"),
-        (middle, top, "FOCUS", "web products"),
-        (split, top + 99, "STATUS", "building"),
-        (middle, top + 99, "ALSO", "game dev"),
-    ):
-        body.append(t(x + 16, y + 28, label, 10, "m"))
-        body.append(t(x + 16, y + 61, value, 13, "p w"))
-    body.append(rect(0, 0, W, H, "none", LINE))
-
-    return svg(W, H, "Screen: product designer and developer. Building Col and Emc². Helping out at GitCafe.",
-               body, t.all + "Screen")
+    body.append(card(PAD, PAD, cw, ch, "none", LINE))
+    return svg(W, H, "Screen: product designer and developer. Building Col and Emc². "
+                     "Working at GitCafe.", body, t.all, t.pixels)
 
 
 # ---------------------------------------------------------------- link chips
@@ -358,42 +394,46 @@ ICONS = {
 
 
 def chip(icon: str, label: str) -> str:
+    """A third of an 880 row: a small card with an icon, the label and an arrow."""
     t = Text()
-    h = box = 36
-    width = int(box + 12 + len(label + "  ↗") * 13 * MONO_ADVANCE + 12)
-    width += width % 2
+    w, h = W / 3, 60
+    cw, ch = w - GAP, h - GAP
+    cy = PAD + ch / 2
     body = [
-        rect(0, 0, width, h, MIDNIGHT),
-        f'<g transform="translate({(box - 16) / 2} {(h - 16) / 2}) scale({16 / 24})">'
+        card(PAD, PAD, cw, ch, SURFACE),
+        f'<g transform="translate({PAD + 18} {cy - 8}) scale({16 / 24})">'
         + ICONS[icon].format(c=SECOND) + "</g>",
-        f'<line x1="{box + .5}" y1="0" x2="{box + .5}" y2="{h}" stroke="{LINE}"/>',
-        t(box + 12, 23, label, 13, "p"),
-        t(width - 12, 23, "↗", 13, "m", "end"),
-        rect(0, 0, width, h, "none", LINE),
+        t(PAD + 18 + 16 + 12, cy + 4.5, label, 13, "p"),
+        t(PAD + cw - 18, cy + 4.5, "↗", 13, "a", "end"),
+        card(PAD, PAD, cw, ch, "none", LINE),
     ]
-    return svg(width, h, label, body, t.all)
+    return svg(w, h, label, body, t.all)
 
 
 # ---------------------------------------------------------------- project tiles
 
-def tile(image_path: Path, index: str, label: str, domain: str, blurb: str, kind: str) -> str:
-    """Half of an 880 row. Shown at width=50% with no gap between the two images,
-    so the cards touch at a shared centre divider, matching the header's width."""
+def tile(image_path: Path, label: str, domain: str, blurb: str) -> str:
+    """Half of an 880 row: a screenshot over a footer with the pixel-font name,
+    a blurb and the domain on the right."""
     t = Text()
-    half = W // 2
-    x0, cw = 0, half
-    ih = round(cw * 630 / 1200)
+    cw = W // 2 - GAP  # 432
+    ih = round(cw * 630 / 1200)  # 227
     with Image.open(image_path) as im:
         shot = im.convert("RGB").resize((cw * 2, ih * 2), Image.LANCZOS)
-    H = 28 + ih + 48
-    body = [rect(x0, 0, cw, H, MIDNIGHT)]
-    body += window_bar(t, x0, 0, cw, index, label, domain)
-    body.append(image(x0, 28, cw, ih, jpeg_data(shot), "image/jpeg"))
-    body.append(hline(x0, x0 + cw, 28 + ih))
-    body.append(t(x0 + 16, 28 + ih + 29, blurb, 13, "p"))
-    body.append(t(x0 + cw - 16, 28 + ih + 29, kind, 12, "m", "end"))
-    body.append(rect(x0, 0, cw, H, "none", LINE))
-    return svg(half, H, f"{label}: {blurb} ({domain})", body, t.all)
+    foot = PAD + ih
+    H = foot + 62 + PAD
+    body = [
+        clip("card", PAD, PAD, cw, ih + 62),
+        card(PAD, PAD, cw, ih + 62, SURFACE),
+        f'<g clip-path="url(#card)">{image(PAD, PAD, cw, ih, jpeg_data(shot), "image/jpeg")}</g>',
+        hline(PAD, PAD + cw, foot),
+        t.px(PAD + 18, foot + 27, label, 20),
+        t(PAD + 18, foot + 47, blurb, 12),
+        t(PAD + cw - 18 - 16, foot + 27, domain, 12, "m", "end"),
+        t(PAD + cw - 18, foot + 27, "↗", 12, "a", "end"),
+        card(PAD, PAD, cw, ih + 62, "none", LINE),
+    ]
+    return svg(W // 2, H, f"{label}: {blurb} ({domain})", body, t.all, t.pixels)
 
 
 # ---------------------------------------------------------------- repo list
@@ -427,25 +467,27 @@ def repo_list() -> str:
 def main() -> None:
     outputs = {
         "header.svg": header(),
+        "tile-col.svg": tile(ASSETS / "website-col.png", "Col", "usecol.com",
+                             "UI libraries, all in one place"),
+        "tile-emc2.svg": tile(ASSETS / "website-emc2.png", "Emc²", "emclient2.vercel.app",
+                              "One inbox for every account"),
         "chip-site.svg": chip("globe", "screeen.us.ci"),
         "chip-nexus.svg": chip("globe", "znsnexus.com"),
         "chip-x.svg": chip("x", "@screeendev"),
-        "tile-col.svg": tile(ASSETS / "website-col.png", "2", "col", "usecol.com",
-                             "UI libraries, all in one place", "web"),
-        "tile-emc2.svg": tile(ASSETS / "website-emc2.png", "3", "emc²", "emclient2.vercel.app",
-                              "One inbox for every account", "desktop"),
         "repos.svg": repo_list(),
     }
     for name, content in outputs.items():
         (ASSETS / name).write_text(content, encoding="utf-8")
         print(f"{name}: {len(content.encode()) // 1024} KB")
 
-    # Change the image URL after a rebuild so GitHub fetches the updated header.
-    version = hashlib.sha256(outputs["header.svg"].encode()).hexdigest()[:12]
+    # Stamp each image URL with the content hash so GitHub fetches the fresh SVGs.
     readme = ROOT / "README.md"
-    readme.write_text(re.sub(r'\./assets/header\.svg(?:\?v=[a-f0-9]+)?',
-                             f"./assets/header.svg?v={version}",
-                             readme.read_text(encoding="utf-8")), encoding="utf-8")
+    text = readme.read_text(encoding="utf-8")
+    for name, content in outputs.items():
+        version = hashlib.sha256(content.encode()).hexdigest()[:12]
+        text = re.sub(rf"\./assets/{re.escape(name)}(?:\?v=[a-f0-9]+)?",
+                      f"./assets/{name}?v={version}", text)
+    readme.write_text(text, encoding="utf-8")
 
 
 if __name__ == "__main__":
