@@ -4,10 +4,11 @@ GitHub strips CSS from READMEs, so every styled panel is an image. Each SVG embe
 its fonts (Geist Mono) and bitmaps, so it renders the same everywhere.
 
 The design is a quiet neofetch-style profile on a transparent background: a
-dithered dot-matrix portrait beside a dotted key/value list, framed project
+dithered portrait beside a dotted key/value list, framed project
 screenshots, thin-ruled link rows and labelled rows of tech chips. Every image is
 built twice, dark and light, and the README picks between them with <picture>
-and prefers-color-scheme.
+and prefers-color-scheme. The portrait is assets/portrait.png, baked by
+astro-dither through scripts/bake_portrait.py (needs a browser, run manually).
 
 Usage: python scripts/build_profile.py
 """
@@ -19,7 +20,6 @@ import re
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-import numpy as np
 from fontTools.subset import Options, Subsetter
 from fontTools.ttLib import TTFont
 from PIL import Image
@@ -43,13 +43,12 @@ MUTED = "#52606B"
 ACCENT = "#0297DE"
 
 # The new transparent panels: dark for GitHub's dark mode, light for its light
-# one. RULE lines and CHIP fills are ACCENT at fixed opacities in both themes.
-# ART is the portrait's dither palette after the transparent index 0.
+# one. RULE lines and CHIP fills are ACCENT at per-theme opacities.
 THEMES = {
     "dark": {"TEXT": "#E6EDF2", "SECOND": "#8B98A4", "MUTED": "#52606B",
-             "ACCENT": "#0297DE", "ART": ("#0E4F80", "#0297DE", "#FFFFFF")},
-    "light": {"TEXT": "#0B1620", "SECOND": "#4A5864", "MUTED": "#9AA7B2",
-              "ACCENT": "#0277B5", "ART": ("#8CC9EC", "#0297DE", "#0A2A4A")},
+             "ACCENT": "#0297DE", "RULE": ".28", "CHIP": ".1"},
+    "light": {"TEXT": "#0B1620", "SECOND": "#3A4752", "MUTED": "#6B7884",
+              "ACCENT": "#0969A8", "RULE": ".5", "CHIP": ".14"},
 }
 
 MONO_ADVANCE = 0.6  # Geist Mono advance per em
@@ -152,13 +151,13 @@ def hline(x1: float, x2: float, y: float, color: str = LINE) -> str:
 def rule(x0: float, x1: float, y: float, th: dict) -> str:
     """A 1px RULE divider line."""
     return (f'<line x1="{x0:g}" y1="{y + .5:g}" x2="{x1:g}" y2="{y + .5:g}" '
-            f'stroke="{th["ACCENT"]}" stroke-opacity=".28"/>')
+            f'stroke="{th["ACCENT"]}" stroke-opacity="{th["RULE"]}"/>')
 
 
 def rule_rect(x: float, y: float, w: float, h: float, th: dict, rx: float = 8) -> str:
     """A rounded 1px RULE stroke, inset .5 like rect."""
     return (f'<rect x="{x + .5:g}" y="{y + .5:g}" width="{w - 1:g}" height="{h - 1:g}" '
-            f'rx="{rx:g}" fill="none" stroke="{th["ACCENT"]}" stroke-opacity=".28"/>')
+            f'rx="{rx:g}" fill="none" stroke="{th["ACCENT"]}" stroke-opacity="{th["RULE"]}"/>')
 
 
 def kv(t: Text, th: dict, x0: float, x1: float, y: float, key: str, value: str,
@@ -209,13 +208,6 @@ def window_bar(t: Text, x: float, y: float, w: float, index: str, label: str, no
     return parts
 
 
-def png_data(img: Image.Image, transparency: int | None = None) -> str:
-    buffer = io.BytesIO()
-    extra = {} if transparency is None else {"transparency": transparency}
-    img.save(buffer, "PNG", optimize=True, **extra)
-    return base64.b64encode(buffer.getvalue()).decode()
-
-
 def jpeg_data(img: Image.Image) -> str:
     buffer = io.BytesIO()
     img.convert("RGB").save(buffer, "JPEG", quality=86, optimize=True, progressive=True)
@@ -228,71 +220,15 @@ def image(x: float, y: float, w: float, h: float, data: str, mime: str) -> str:
             f'preserveAspectRatio="xMidYMid slice" href="{uri}" xlink:href="{uri}"/>')
 
 
-# ---------------------------------------------------------------- dither
-
-BAYER8 = np.array([
-    [0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26],
-    [12, 44, 4, 36, 14, 46, 6, 38], [60, 28, 52, 20, 62, 30, 54, 22],
-    [3, 35, 11, 43, 1, 33, 9, 41], [51, 19, 59, 27, 49, 17, 57, 25],
-    [15, 47, 7, 39, 13, 45, 5, 37], [63, 31, 55, 23, 61, 29, 53, 21],
-]) / 64 + 1 / 128
-
-
-def ordered_dither(tone: np.ndarray, colors: int) -> np.ndarray:
-    """Palette index per cell: tone in [0,1] split into `colors` steps by a Bayer threshold."""
-    rows, cols = tone.shape
-    threshold = np.tile(BAYER8, (rows // 8 + 1, cols // 8 + 1))[:rows, :cols]
-    scaled = np.clip(tone, 0, 1) * (colors - 1)
-    index = np.floor(scaled)
-    return np.minimum(index + (scaled - index > threshold), colors - 1).astype(np.uint8)
-
-
-def palette_image(index: np.ndarray, colors: list[str]) -> Image.Image:
-    img = Image.fromarray(index, "P")
-    flat = []
-    for c in colors:
-        flat += [int(c[i:i + 2], 16) for i in (1, 3, 5)]
-    img.putpalette(flat)
-    return img
-
-
 # ---------------------------------------------------------------- profile blocks
 
-def portrait_tone(cells: int = 144) -> np.ndarray:
-    """Tone for the dithered avatar: a low-gain shading term plus a line term, so
-    the face reads as thin line art over a sparse skin dither and the near-white
-    background and hair drop to zero. The line term is computed at 2x resolution
-    and max-pooled down, keeping strokes 1 to 2 cells wide."""
-    with Image.open(ASSETS / "avatar.png") as im:
-        gray = im.convert("L")
-        lum2 = np.asarray(gray.resize((cells * 2, cells * 2), Image.LANCZOS), dtype=float) / 255
-        lum = np.asarray(gray.resize((cells, cells), Image.LANCZOS), dtype=float) / 255
-    shade = np.clip((1 - lum - 0.13) * 1.15, 0, 0.55)
-    light = lum2 > 0.6
-    near = light.copy()
-    for _ in range(4):
-        near[1:, :] |= near[:-1, :]
-        near[:-1, :] |= near[1:, :]
-        near[:, 1:] |= near[:, :-1]
-        near[:, :-1] |= near[:, 1:]
-    dark_thin = (lum2 < 0.5) & near
-    gy, gx = np.gradient(lum2)
-    edge = np.clip((np.hypot(gx, gy) - 0.09) * 6, 0, 1)
-    lines = np.maximum(dark_thin, edge).reshape(cells, 2, cells, 2).max(axis=(1, 3))
-    tone = np.clip(shade + lines, 0, 1)
-    return np.where(tone < 0.05, 0, tone)
-
-
-def intro(th: dict, tone: np.ndarray) -> str:
-    """The top block: the dithered portrait on the left, a neofetch info list on
-    the right. One soft scanline travels down the portrait."""
+def intro(th: dict, portrait: str) -> str:
+    """The top block: the baked portrait as an opaque RULE-framed tile on the
+    left, a neofetch info list on the right."""
     t = Text()
-    body = [clip("av", 6, 16, 288, 288, rx=10)]
-    art = palette_image(ordered_dither(tone, 4), ["#000000", *th["ART"]])
-    png = png_data(art.resize((288, 288), Image.NEAREST), transparency=0)
-    scan = (f'<rect class="scan" x="6" y="16" width="288" height="28" '
-            f'fill="{th["ACCENT"]}" opacity=".1"/>')
-    body.append(f'<g clip-path="url(#av)">{image(6, 16, 288, 288, png, "image/png")}{scan}</g>')
+    body = [clip("av", 6, 16, 288, 288, rx=10),
+            f'<g clip-path="url(#av)">{image(6, 16, 288, 288, portrait, "image/png")}</g>',
+            rule_rect(6, 16, 288, 288, th, rx=10)]
 
     x0, x1, s, pitch = 336, 874, 13, 26
     body.append(head(t, th, x0, x1, 46, "screen@github", s))
@@ -312,11 +248,9 @@ def intro(th: dict, tone: np.ndarray) -> str:
     body.append(f'<rect class="blink" x="{sq:g}" y="{y - 8:g}" width="6" height="6" '
                 f'fill="{th["ACCENT"]}"/>')
 
-    extra = ('@keyframes scan{0%{transform:translateY(-28px)}100%{transform:translateY(316px)}}'
-             '@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:.2}}'
-             '.scan{animation:scan 5s linear infinite}'
+    extra = ('@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:.2}}'
              '.blink{animation:blink 1.2s steps(1,end) infinite}'
-             '@media(prefers-reduced-motion:reduce){.scan,.blink{animation:none}}')
+             '@media(prefers-reduced-motion:reduce){.blink{animation:none}}')
     return svg(W, 320, "Screen: product designer and developer. Building Col and Emc². "
                        "Working at GitCafe.", body, css(th, t.all, extra))
 
@@ -366,7 +300,7 @@ def stack(th: dict) -> str:
             cw = 16 + (19 if icon else 0) + len(name) * 12 * MONO_ADVANCE
             cy = top + 8
             parts = [f'<rect x="{cx:g}" y="{cy:g}" width="{cw:g}" height="24" rx="6" '
-                     f'fill="{th["ACCENT"]}" fill-opacity=".1"/>']
+                     f'fill="{th["ACCENT"]}" fill-opacity="{th["CHIP"]}"/>']
             tx = cx + 8
             if icon:
                 parts.append(f'<g transform="translate({tx:g} {cy + 5.5:g}) scale({13 / 24})">'
@@ -382,11 +316,10 @@ def stack(th: dict) -> str:
                body, css(th, t.all))
 
 
-def build(th: dict) -> dict[str, str]:
-    """The seven README blocks for one theme; the portrait tone is shared."""
-    tone = portrait_tone()
+def build(th: dict, portrait: str) -> dict[str, str]:
+    """The seven README blocks for one theme; the portrait PNG is shared."""
     return {
-        "intro": intro(th, tone),
+        "intro": intro(th, portrait),
         "project-col": project(ASSETS / "website-col.png", th, "col@usecol.com",
                                [("What:", "UI libraries, components and design tools"),
                                 ("Kind:", "community directory"),
@@ -436,11 +369,12 @@ def main() -> None:
     # repos.svg is not rebuilt: fontTools no longer encodes the subset to the
     # same bytes, so regenerating it would only churn the file.
     outputs = {}
+    portrait = base64.b64encode((ASSETS / "portrait.png").read_bytes()).decode()
     for theme, th in THEMES.items():
-        for name, content in build(th).items():
+        for name, content in build(th, portrait).items():
             outputs[f"{name}-{theme}.svg"] = content
     for name, content in outputs.items():
-        (ASSETS / name).write_text(content, encoding="utf-8")
+        (ASSETS / name).write_text(content, encoding="utf-8", newline="\n")
         print(f"{name}: {len(content.encode()) // 1024} KB")
 
     # Stamp each image URL with the content hash so GitHub fetches the fresh SVGs.
