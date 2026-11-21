@@ -22,6 +22,7 @@ from xml.sax.saxutils import escape
 
 import numpy as np
 from fontTools.pens.boundsPen import BoundsPen
+from fontTools.pens.transformPen import TransformPen
 from fontTools.subset import Options, Subsetter
 from fontTools.ttLib import TTFont
 from fontTools.varLib.instancer import instantiateVariableFont
@@ -84,10 +85,10 @@ def font_faces(text: str, pixel_text: str = "") -> str:
         rules.append(f"@font-face{{font-family:GM;font-weight:{weight};"
                      f"src:url(data:font/woff2;base64,{data}) format('woff2')}}")
     if pixel_text:
-        # ELSH 1 is the "Square" cut: each pixel a separate square, like the dither
-        pixel = instantiateVariableFont(TTFont(FONTS / "GeistPixel.ttf"), {"ELSH": 1})
-        data = subset(pixel, pixel_text)
-        rules.append(f"@font-face{{font-family:GP;src:url(data:font/woff2;base64,{data}) format('woff2')}}")
+        # The wordmark face: DM Sans variable instantiated at Bold.
+        dm = instantiateVariableFont(TTFont(FONTS / "DMSans-Variable.woff2"), {"wght": 700})
+        data = subset(dm, pixel_text)
+        rules.append(f"@font-face{{font-family:DM;src:url(data:font/woff2;base64,{data}) format('woff2')}}")
     return "".join(rules)
 
 
@@ -99,7 +100,7 @@ def css(th: dict, text: str, extra: str = "", pixel_text: str = "") -> str:
         + f"text{{font-family:GM,'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;"
         f"fill:{th['SECOND']};white-space:pre}}"
         f".p{{fill:{th['TEXT']}}}.m{{fill:{th['MUTED']}}}.a{{fill:{th['ACCENT']}}}.w{{font-weight:500}}"
-        + (".px{font-family:GP,'Geist Pixel','Geist Mono',monospace}" if pixel_text else "")
+        + (".px{font-family:DM,'DM Sans',sans-serif}" if pixel_text else "")
         + "image{image-rendering:pixelated}" + extra
     )
 
@@ -117,10 +118,13 @@ def repos_css(text: str) -> str:
     )
 
 
-def svg(width: float, height: float, title: str, body: list[str], style: str) -> str:
+def svg(width: float, height: float, title: str, body: list[str], style: str,
+        viewbox: tuple[float, float, float, float] | None = None) -> str:
+    vb = viewbox or (0, 0, width, height)
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
-        f'width="{width:g}" height="{height:g}" viewBox="0 0 {width:g} {height:g}" role="img">'
+        f'width="{width:g}" height="{height:g}" '
+        f'viewBox="{vb[0]:g} {vb[1]:g} {vb[2]:g} {vb[3]:g}" role="img">'
         f"<title>{escape(title)}</title><style>{style}</style>{''.join(body)}</svg>\n"
     )
 
@@ -150,10 +154,16 @@ def rect(x: float, y: float, w: float, h: float, fill: str = "none", stroke: str
     return f'<rect x="{x:g}" y="{y:g}" width="{w:g}" height="{h:g}" fill="{fill}"/>'
 
 
-def clip(clip_id: str, x: float, y: float, w: float, h: float, rx: float = 8) -> str:
-    """A rounded-rect clipPath. Ids only need to be unique within each SVG file."""
-    return (f'<clipPath id="{clip_id}"><rect x="{x:g}" y="{y:g}" width="{w:g}" height="{h:g}" '
-            f'rx="{rx:g}"/></clipPath>')
+def notch(x: float, y: float, w: float, h: float, n: float) -> str:
+    """A rectangle path with one n-square step cut from every corner, used for
+    fills, strokes and clipPaths in place of rounded corners."""
+    return (f"M{x + n:g} {y:g}H{x + w - n:g}V{y + n:g}H{x + w:g}V{y + h - n:g}"
+            f"H{x + w - n:g}V{y + h:g}H{x + n:g}V{y + h - n:g}H{x:g}V{y + n:g}H{x + n:g}Z")
+
+
+def clip(clip_id: str, x: float, y: float, w: float, h: float, n: float = 4) -> str:
+    """A notched clipPath. Ids only need to be unique within each SVG file."""
+    return f'<clipPath id="{clip_id}"><path d="{notch(x, y, w, h, n)}"/></clipPath>'
 
 
 def hline(x1: float, x2: float, y: float, color: str = LINE) -> str:
@@ -166,10 +176,10 @@ def rule(x0: float, x1: float, y: float, th: dict) -> str:
             f'stroke="{th["ACCENT"]}" stroke-opacity="{th["RULE"]}"/>')
 
 
-def rule_rect(x: float, y: float, w: float, h: float, th: dict, rx: float = 8) -> str:
-    """A rounded 1px RULE stroke, inset .5 like rect."""
-    return (f'<rect x="{x + .5:g}" y="{y + .5:g}" width="{w - 1:g}" height="{h - 1:g}" '
-            f'rx="{rx:g}" fill="none" stroke="{th["ACCENT"]}" stroke-opacity="{th["RULE"]}"/>')
+def rule_notch(x: float, y: float, w: float, h: float, th: dict, n: float = 4) -> str:
+    """A notched 1px RULE stroke, on half pixels so it renders crisp."""
+    return (f'<path d="{notch(x + .5, y + .5, w - 1, h - 1, n)}" fill="none" '
+            f'stroke="{th["ACCENT"]}" stroke-opacity="{th["RULE"]}"/>')
 
 
 def window_bar(t: Text, x: float, y: float, w: float, index: str, label: str, note: str = "",
@@ -231,100 +241,107 @@ def dither_gradient(w: int, h: int, box_h: int, colors: list[str], cell: int = 2
 
 # ---------------------------------------------------------------- profile blocks
 
-def wordmark_box(text: str, size: int) -> tuple[float, float, float]:
-    """Advance width and ink extents (below, above the baseline) of `text` in
-    the Square cut of Geist Pixel, measured from the actual outlines."""
-    font = instantiateVariableFont(TTFont(FONTS / "GeistPixel.ttf"), {"ELSH": 1})
+def wordmark_box(text: str, ls_em: float = -0.04) -> tuple[float, float, float, float]:
+    """Ink bounds of `text` in DM Sans Bold with letter-spacing, in font units:
+    (left, bottom, right, top) relative to the pen origin and baseline."""
+    font = instantiateVariableFont(TTFont(FONTS / "DMSans-Variable.woff2"), {"wght": 700})
     cmap, hmtx, gs = font.getBestCmap(), font["hmtx"], font.getGlyphSet()
-    scale = size / font["head"].unitsPerEm
-    width = sum(hmtx[cmap[ord(c)]][0] for c in text) * scale
+    upm = font["head"].unitsPerEm
     pen = BoundsPen(gs)
+    pos = 0.0
     for c in text:
-        gs[cmap[ord(c)]].draw(pen)
-    return width, pen.bounds[1] * scale, pen.bounds[3] * scale
+        gs[cmap[ord(c)]].draw(TransformPen(pen, (1, 0, 0, 1, pos, 0)))
+        pos += hmtx[cmap[ord(c)]][0] + ls_em * upm
+    return pen.bounds
 
 
-def intro(th: dict, portrait: str) -> str:
-    """The top block: the baked portrait as an opaque RULE-framed tile on the
-    left; on the right a pixel wordmark filled with an animated ordered-dither
-    gradient, a role line, a meta line and a blinking status chip."""
-    t = Text()
-    body = [clip("av", 6, 16, 288, 288, rx=10),
+def portrait_tile(th: dict, portrait: str) -> list[str]:
+    """The baked portrait as an opaque notched RULE-framed tile at the master
+    position (x=6, y=16, 288x288). Emitted into every slice that shows it."""
+    return [clip("av", 6, 16, 288, 288),
             f'<g clip-path="url(#av)">{image(6, 16, 288, 288, portrait, "image/png")}</g>',
-            rule_rect(6, 16, 288, 288, th, rx=10)]
+            rule_notch(6, 16, 288, 288, th)]
 
-    x, baseline = 336, 128
-    size = 124
-    wm_w, wm_bot, wm_top = wordmark_box("Screen", size)
-    if wm_w > 874 - x:
-        size = int(size * (874 - x) / wm_w)
-        wm_w, wm_bot, wm_top = wordmark_box("Screen", size)
+
+def intro(th: dict, portrait: str) -> dict[str, str]:
+    """The master top block cut into the `intro` and `portrait-foot` slices:
+    the portrait tile on the left; on the right a DM Sans wordmark filled with
+    an animated ordered-dither gradient, a role line and a meta line. The three
+    link images sit beside portrait-foot, so the portrait is cut at y=264."""
+    t = Text()
+    body = portrait_tile(th, portrait)
+
+    # Wordmark: largest size whose ink fits 500 units, S top at y=16.
+    lx, ly, rx, ry = wordmark_box("Screen")
+    upm = 1000
+    size = int(500 / (rx - lx) * upm * 10) / 10
+    x, baseline = 336, 16 + ry / upm * size
     cell = 2
-    top = int(round(baseline - wm_top))
-    box_w = int(np.ceil(wm_w / cell)) * cell
-    box_h = int(np.ceil((baseline - wm_bot - top) / cell)) * cell
+    top = int(round(16))
+    box_x = int(np.floor((x + lx / upm * size) / cell)) * cell
+    box_w = int(np.ceil((x + rx / upm * size - box_x) / cell)) * cell
+    box_h = int(np.ceil((baseline - ly / upm * size - top) / cell)) * cell
     spare = int(round(0.4 * box_h / cell)) * cell
     grad = dither_gradient(box_w, box_h + spare, box_h, th["WM"], cell)
     body.append(
-        f'<mask id="wm" maskUnits="userSpaceOnUse" x="{x}" y="{top}" '
+        f'<mask id="wm" maskUnits="userSpaceOnUse" x="{box_x}" y="{top}" '
         f'width="{box_w}" height="{box_h}">'
-        f'<text x="{x}" y="{baseline}" font-size="{size}" class="px" '
-        'style="fill:#fff">Screen</text></mask>'
+        f'<text x="{x - lx / upm * size:g}" y="{baseline:g}" font-size="{size:g}" '
+        'letter-spacing="-0.04em" class="px" style="fill:#fff">Screen</text></mask>'
         f'<g mask="url(#wm)">'
-        f'{image(x, top, box_w, box_h + spare, grad, "image/png", "wmd")}</g>')
-    body.append(t(x, 176, "Product designer and developer", 16, "p"))
-    body.append(t(x, 202, "GitCafe  ·  Sharjah, UAE", 13))
-
-    label = "Building Col and Emc²"
-    cw = 12 + 6 + 8 + len(label) * 12 * MONO_ADVANCE + 12
-    body.append(f'<rect x="{x}" y="274" width="{cw:g}" height="30" rx="8" '
-                f'fill="{th["ACCENT"]}" fill-opacity="{th["CHIP"]}"/>'
-                f'<rect class="blink" x="{x + 12}" y="286" width="6" height="6" '
-                f'fill="{th["ACCENT"]}"/>')
-    body.append(t(x + 26, 293.5, label, 12, "p w"))
+        f'{image(box_x, top, box_w, box_h + spare, grad, "image/png", "wmd")}</g>')
+    body.append(t(x, baseline + 34, "Product designer and developer", 16, "p"))
+    body.append(t(x, baseline + 60, "GitCafe  ·  Sharjah, UAE", 13))
 
     steps = spare // cell
     extra = (f'@keyframes wmd{{to{{transform:translateY(-{spare}px)}}}}'
              f'.wmd{{animation:wmd 7s steps({steps}) infinite alternate}}'
-             '@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:.2}}'
-             '.blink{animation:blink 1.2s steps(1,end) infinite}'
-             '@media(prefers-reduced-motion:reduce){.wmd,.blink{animation:none}}')
-    return svg(W, 320, "Screen: product designer and developer. Building Col and Emc². "
-                       "Working at GitCafe.", body, css(th, t.all, extra, "Screen"))
+             '@media(prefers-reduced-motion:reduce){.wmd{animation:none}}')
+    title = ("Screen: product designer and developer. Building Col and Emc². "
+             "Working at GitCafe.")
+    out = {"intro": svg(W, 264, title, body, css(th, t.all, extra, "Screen"),
+                        (0, 0, W, 264))}
+    # The foot slice is only the tile's bottom 40 units; it needs no fonts.
+    out["portrait-foot"] = svg(330, 56, "", portrait_tile(th, portrait),
+                               "image{image-rendering:pixelated}", (0, 264, 330, 56))
+    return out
 
 
 def project(image_path: Path, th: dict, name: str, caption: str, title: str) -> str:
-    """Half-width block: a RULE-framed screenshot over a one-line caption."""
+    """Half-width block: a notched RULE-framed screenshot over a one-line
+    caption."""
     t = Text()
     iw, ih = 428, 225
     with Image.open(image_path) as im:
         shot = jpeg_data(im.convert("RGB").resize((iw * 2, ih * 2), Image.LANCZOS))
-    y = 20 + ih + 28
-    body = [clip("shot", 6, 20, iw, ih),
-            f'<g clip-path="url(#shot)">{image(6, 20, iw, ih, shot, "image/jpeg")}</g>',
-            rule_rect(6, 20, iw, ih, th),
+    y = 4 + ih + 28
+    body = [clip("shot", 6, 4, iw, ih),
+            f'<g clip-path="url(#shot)">{image(6, 4, iw, ih, shot, "image/jpeg")}</g>',
+            rule_notch(6, 4, iw, ih, th),
             t(6, y, name, 14, "p w"),
             t(6 + len(name) * 14 * MONO_ADVANCE + 12, y, caption, 12),
             t(434, y, "↗", 13, "a", "end")]
     return svg(W // 2, y + 12, title, body, css(th, t.all))
 
 
-def link_btn(th: dict, label: str, icon: str, title: str) -> str:
-    """A third-width block: one outlined button with an icon, the handle and a
-    trailing arrow."""
+def link_btn(th: dict, label: str, icon: str, title: str, mx: float) -> str:
+    """One outlined link button, drawn at its master x so the slice viewBox can
+    cut it out of the intro master's bottom row (button y 264..304)."""
     t = Text()
-    w = W / 3
-    icon_markup = (f'<g transform="translate(20 21) scale({14 / 24})" stroke="{th["ACCENT"]}">'
-                   f'{GLOBE}</g>' if icon == "globe" else
-                   f'<g transform="translate(20 21) scale({14 / 24})">'
+    w = 550 / 3
+    bx, by = mx + 6, 264
+    icon_markup = (f'<g transform="translate({bx + 12:g} {by + 13.5:g}) scale({13 / 24})" '
+                   f'stroke="{th["ACCENT"]}">{GLOBE}</g>' if icon == "globe" else
+                   f'<g transform="translate({bx + 12:g} {by + 13.5:g}) scale({13 / 24})">'
                    f'<path fill="{th["ACCENT"]}" d="{ICONS[icon]}"/></g>')
-    body = [f'<rect x="6.5" y="8.5" width="{w - 13:g}" height="39" rx="8" '
-            f'fill="{th["ACCENT"]}" fill-opacity="{th["CHIP"]}" '
+    body = [f'<path d="{notch(bx, by, w - 12, 40, 4)}" fill="{th["ACCENT"]}" '
+            f'fill-opacity="{th["CHIP"]}"/>',
+            f'<path d="{notch(bx + .5, by + .5, w - 13, 39, 4)}" fill="none" '
             f'stroke="{th["ACCENT"]}" stroke-opacity="{th["RULE"]}"/>',
             icon_markup,
-            t(44, 32.5, label, 13, "p"),
-            t(w - 20, 32.5, "↗", 13, "a", "end")]
-    return svg(w, 56, title, body, css(th, t.all))
+            t(bx + 33, by + 24.5, label, 12, "p"),
+            t(bx + w - 18, by + 24.5, "↗", 12, "a", "end")]
+    return svg(w, 56, title, body, css(th, t.all), (mx, 264, w, 56))
 
 
 def stack(th: dict) -> str:
@@ -332,8 +349,8 @@ def stack(th: dict) -> str:
     t = Text()
     rows = [("languages", ["TypeScript", "JavaScript", "Python"]),
             ("frontend", ["React", "Next.js", "Astro", "TanStack", "Tailwind", "Vite", "Motion"]),
-            ("desktop / ai", ["Electron", "MCP", "AI SDK", "Claude", "OpenAI"]),
-            ("infra", ["Bun", "Cloudflare", "Vercel", "Convex", "SQLite"])]
+            ("desktop / ai", ["Electron", "AI SDK", "Claude", "OpenAI"]),
+            ("infra", ["Bun", "Cloudflare", "Convex", "SQLite"])]
     body = []
     for i, (label, names) in enumerate(rows):
         top = 12 + i * 40
@@ -344,8 +361,8 @@ def stack(th: dict) -> str:
             icon = ICONS.get(name)
             cw = 16 + (19 if icon else 0) + len(name) * 12 * MONO_ADVANCE
             cy = top + 8
-            parts = [f'<rect x="{cx:g}" y="{cy:g}" width="{cw:g}" height="24" rx="6" '
-                     f'fill="{th["ACCENT"]}" fill-opacity="{th["CHIP"]}"/>']
+            parts = [f'<path d="{notch(cx, cy, cw, 24, 2)}" fill="{th["ACCENT"]}" '
+                     f'fill-opacity="{th["CHIP"]}"/>']
             tx = cx + 8
             if icon:
                 parts.append(f'<g transform="translate({tx:g} {cy + 5.5:g}) scale({13 / 24})">'
@@ -356,24 +373,27 @@ def stack(th: dict) -> str:
             cx += cw + 6
     body.append(rule(6, 874, 172, th))
     return svg(W, 176, "Stack: TypeScript, JavaScript, Python, React, Next.js, Astro, "
-                       "TanStack, Tailwind, Vite, Motion, Electron, MCP, AI SDK, Claude, "
-                       "OpenAI, Bun, Cloudflare, Vercel, Convex, SQLite.",
+                       "TanStack, Tailwind, Vite, Motion, Electron, AI SDK, Claude, "
+                       "OpenAI, Bun, Cloudflare, Convex, SQLite.",
                body, css(th, t.all))
 
 
 def build(th: dict, portrait: str) -> dict[str, str]:
-    """The seven README blocks for one theme; the portrait PNG is shared."""
+    """The eight README images for one theme; the portrait PNG is shared."""
+    lw = 550 / 3
     return {
-        "intro": intro(th, portrait),
+        **intro(th, portrait),
+        "link-site": link_btn(th, "screeen.us.ci", "globe", "screeen.us.ci", 330),
+        "link-nexus": link_btn(th, "znsnexus.com", "globe", "znsnexus.com",
+                               330 + lw),
+        "link-x": link_btn(th, "@screeendev", "X", "@screeendev on X",
+                           330 + 2 * lw),
         "project-col": project(ASSETS / "website-col.png", th, "Col",
                                "UI libraries, all in one place",
                                "Col: UI libraries, components and design tools, all in one place. usecol.com"),
         "project-emc2": project(ASSETS / "website-emc2.png", th, "Emc²",
                                 "One inbox for every account",
                                 "Emc²: a desktop email client with one inbox for every account"),
-        "link-site": link_btn(th, "screeen.us.ci", "globe", "screeen.us.ci"),
-        "link-nexus": link_btn(th, "znsnexus.com", "globe", "znsnexus.com"),
-        "link-x": link_btn(th, "@screeendev", "X", "@screeendev on X"),
         "stack": stack(th),
     }
 

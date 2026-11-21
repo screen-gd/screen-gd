@@ -35,6 +35,20 @@ CSS = ("dither-image{display:block;position:relative;width:100%;height:100%;over
        "dither-image img{position:absolute;inset:0;display:block;width:100%;height:100%;"
        "object-fit:var(--dither-image-fit,cover)}")
 
+# White point for the levels pre-pass: the near-white backdrop gets clipped to
+# pure white so the dither cannot scatter tinted dots into it.
+WHITE_POINT = 232
+
+
+def flatten_backdrop() -> bytes:
+    """The avatar PNG with highlights clipped to pure white."""
+    with Image.open(ROOT / "assets" / "avatar.png") as im:
+        rgb = np.asarray(im.convert("RGB"), dtype=float)
+    flat = np.clip(rgb * 255 / WHITE_POINT, 0, 255).astype(np.uint8)
+    buffer = io.BytesIO()
+    Image.fromarray(flat).save(buffer, "PNG", optimize=True)
+    return buffer.getvalue()
+
 
 def run(cmd: list[str]) -> None:
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -54,7 +68,7 @@ def main() -> None:
     if not (lib / "mount-image-dither.ts").exists():
         raise SystemExit(f"mount-image-dither.ts not found under {lib}")
 
-    avatar = base64.b64encode((ROOT / "assets" / "avatar.png").read_bytes()).decode()
+    avatar = base64.b64encode(flatten_backdrop()).decode()
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
         entry = tmp / "entry.ts"
@@ -77,18 +91,25 @@ def main() -> None:
             encoding="utf-8")
 
         shot = tmp / "shot.png"
-        run([EDGE, "--headless=new", "--hide-scrollbars",
-             f"--window-size={SIZE},{SIZE}", "--force-device-scale-factor=1",
-             "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
-             "--virtual-time-budget=15000",
-             f"--screenshot={shot}", html.as_uri()])
-        with Image.open(shot) as im:
-            capture = im.convert("RGBA").resize((SIZE, SIZE), Image.NEAREST)
-    cells = np.array(capture).reshape(SIZE // 2, 2, SIZE // 2, 2, 4)
-    uniform = (cells == cells[:, :1, :, :1]).all(axis=(1, 2, 3)).mean()
-    if uniform < 0.5:
-        print(f"warning: only {uniform:.0%} of cells are uniform; "
-              "the shader may not have mounted before the screenshot")
+        capture = None
+        # The shader mount races the virtual-time budget; retry until the
+        # capture really is dithered cells (uniform 2x2 blocks), not the
+        # fallback <img>.
+        for attempt in range(4):
+            run([EDGE, "--headless=new", "--hide-scrollbars",
+                 f"--window-size={SIZE},{SIZE}", "--force-device-scale-factor=1",
+                 "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
+                 "--virtual-time-budget=15000",
+                 f"--screenshot={shot}", html.as_uri()])
+            with Image.open(shot) as im:
+                capture = im.convert("RGBA").resize((SIZE, SIZE), Image.NEAREST)
+            cells = np.array(capture).reshape(SIZE // 2, 2, SIZE // 2, 2, 4)
+            uniform = (cells == cells[:, :1, :, :1]).all(axis=(1, 2, 3)).mean()
+            if uniform >= 0.5:
+                break
+            print(f"attempt {attempt + 1}: {uniform:.0%} of cells uniform, retrying")
+        else:
+            raise SystemExit("shader did not mount after 4 attempts")
 
     dest = ROOT / "assets" / "portrait.png"
     rgb, pal = capture.convert("RGB"), capture.convert("P", palette=Image.ADAPTIVE)
