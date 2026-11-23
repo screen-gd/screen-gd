@@ -5,7 +5,7 @@ its fonts (Geist Mono, Geist Pixel) and bitmaps, so it renders the same everywhe
 
 The design is a quiet profile on a transparent background: a dithered portrait
 tile beside a dither-gradient pixel wordmark, framed project screenshots with
-one-line captions, outlined link buttons and labelled rows of tech chips. Every
+one-line captions, outlined link buttons and animated pixel waves. Every
 image is built twice, dark and light, and the README picks between them with
 <picture> and prefers-color-scheme. The portrait is assets/portrait.png, baked
 by astro-dither through scripts/bake_portrait.py (needs a browser, run manually).
@@ -352,38 +352,32 @@ def link_btn(th: dict, label: str, icon: str, title: str, mx: float) -> str:
     return svg(w, 56, title, body, css(th, t.all), (mx, 264, w, 56))
 
 
-def stack(th: dict) -> str:
-    """Full-width block: four RULE-separated rows of labelled tech chips."""
-    t = Text()
-    rows = [("languages", ["TypeScript", "JavaScript", "Python"]),
-            ("frontend", ["React", "Next.js", "Astro", "TanStack", "Tailwind", "Vite", "Motion"]),
-            ("desktop / ai", ["Electron", "AI SDK", "Claude", "OpenAI"]),
-            ("infra", ["Bun", "Cloudflare", "Convex", "SQLite"])]
+# A decorative footer image keeps animation self-contained in GitHub's README.
+def pixel_wave(th: dict) -> str:
+    """Draw three travelling pixel waves; reduced-motion readers see a still wave."""
+    import math
+
     body = []
-    for i, (label, names) in enumerate(rows):
-        top = 12 + i * 40
-        body.append(rule(6, 874, top, th))
-        body.append(t(6, top + 24.5, label, 12, "p w"))
-        cx = 130.0
-        for name in names:
-            icon = ICONS.get(name)
-            cw = 16 + (19 if icon else 0) + len(name) * 12 * MONO_ADVANCE
-            cy = top + 8
-            parts = [f'<path d="{notch(cx, cy, cw, 24, 2)}" fill="{th["ACCENT"]}" '
-                     f'fill-opacity="{th["CHIP"]}"/>']
-            tx = cx + 8
-            if icon:
-                parts.append(f'<g transform="translate({tx:g} {cy + 5.5:g}) scale({13 / 24})">'
-                             f'<path fill="{th["ACCENT"]}" d="{icon}"/></g>')
-                tx += 19
-            parts.append(t(tx, top + 24.5, name, 12, "p"))
-            body.append("".join(parts))
-            cx += cw + 6
-    body.append(rule(6, 874, 172, th))
-    return svg(W, 176, "Stack: TypeScript, JavaScript, Python, React, Next.js, Astro, "
-                       "TanStack, Tailwind, Vite, Motion, Electron, AI SDK, Claude, "
-                       "OpenAI, Bun, Cloudflare, Convex, SQLite.",
-               body, css(th, t.all))
+    for layer in range(3):
+        cells = []
+        for column in range(109):
+            x = 6 + column * 8
+            y = 52 + round((math.sin(column / 11 + layer * 1.7) * 17
+                            + math.sin(column / 23) * 9) / 4) * 4
+            cells.append(rect(x, y, 3, 3, th["ACCENT"]))
+            if column % 3 == layer:
+                cells.append(rect(x, y + 8, 3, 3, th["ACCENT"]))
+        body.append(f'<g class="wave wave-{layer}">{"".join(cells)}</g>')
+    style = (
+        ".wave{transform-box:view-box;transform-origin:center;opacity:.35}"
+        ".wave-0{animation:drift 8s ease-in-out infinite}"
+        ".wave-1{opacity:.6;animation:drift 10s ease-in-out -3s infinite reverse}"
+        ".wave-2{opacity:.85;animation:drift 12s ease-in-out -6s infinite}"
+        "@keyframes drift{0%,100%{transform:translateY(-8px)}"
+        "50%{transform:translateY(8px)}}"
+        "@media(prefers-reduced-motion:reduce){.wave{animation:none}}"
+    )
+    return svg(W, 108, "Animated blue pixel waves", body, style)
 
 
 def build(th: dict, portrait: str) -> dict[str, str]:
@@ -402,7 +396,7 @@ def build(th: dict, portrait: str) -> dict[str, str]:
         "project-emc2": project(ASSETS / "website-emc2.png", th, "Emc²",
                                 "One inbox for every account",
                                 "Emc²: a desktop email client with one inbox for every account"),
-        "stack": stack(th),
+        "pixel-wave": pixel_wave(th),
     }
 
 
