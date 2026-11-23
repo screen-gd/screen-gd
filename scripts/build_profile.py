@@ -4,8 +4,8 @@ GitHub strips CSS from READMEs, so every styled panel is an image. Each SVG embe
 its fonts (Geist Mono, Geist Pixel) and bitmaps, so it renders the same everywhere.
 
 The design is a quiet profile on a transparent background: a dithered portrait
-tile beside a dither-gradient pixel wordmark, framed project screenshots with
-one-line captions, outlined link buttons and an animated pixel harbour city. Every
+tile beside a dither-gradient pixel wordmark, tinted link buttons and an
+animated pixel harbour city that sits straight on the page background. Every
 image is built twice, dark and light, and the README picks between them with
 <picture> and prefers-color-scheme. The portrait is assets/portrait.png, baked
 by astro-dither through scripts/bake_portrait.py (needs a browser, run manually).
@@ -178,12 +178,6 @@ def rule(x0: float, x1: float, y: float, th: dict) -> str:
             f'stroke="{th["ACCENT"]}" stroke-opacity="{th["RULE"]}"/>')
 
 
-def rule_notch(x: float, y: float, w: float, h: float, th: dict, n: float = 4) -> str:
-    """A notched 1px RULE stroke, on half pixels so it renders crisp."""
-    return (f'<path d="{notch(x + .5, y + .5, w - 1, h - 1, n)}" fill="none" '
-            f'stroke="{th["ACCENT"]}" stroke-opacity="{th["RULE"]}"/>')
-
-
 def window_bar(t: Text, x: float, y: float, w: float, index: str, label: str, note: str = "",
                fill: str = SURFACE, line: str = LINE) -> list[str]:
     """A tmux-style title bar: index, name and a muted note on the right."""
@@ -195,12 +189,6 @@ def window_bar(t: Text, x: float, y: float, w: float, index: str, label: str, no
     if note:
         parts.append(t(x + w - 12, y + 18, note, 12, "m", "end"))
     return parts
-
-
-def jpeg_data(img: Image.Image) -> str:
-    buffer = io.BytesIO()
-    img.convert("RGB").save(buffer, "JPEG", quality=86, optimize=True, progressive=True)
-    return base64.b64encode(buffer.getvalue()).decode()
 
 
 def image(x: float, y: float, w: float, h: float, data: str, mime: str,
@@ -258,11 +246,10 @@ def wordmark_box(text: str) -> tuple[tuple[float, float, float, float], int]:
 
 
 def portrait_tile(th: dict, portrait: str) -> list[str]:
-    """The baked portrait as an opaque notched RULE-framed tile at the master
-    position (x=6, y=16, 288x288). Emitted into every slice that shows it."""
+    """The baked portrait as an opaque notched tile at the master position
+    (x=6, y=16, 288x288). Emitted into every slice that shows it."""
     return [clip("av", 6, 16, 288, 288),
-            f'<g clip-path="url(#av)">{image(6, 16, 288, 288, portrait, "image/png")}</g>',
-            rule_notch(6, 16, 288, 288, th)]
+            f'<g clip-path="url(#av)">{image(6, 16, 288, 288, portrait, "image/png")}</g>']
 
 
 def intro(th: dict, portrait: str) -> dict[str, str]:
@@ -316,25 +303,8 @@ def intro(th: dict, portrait: str) -> dict[str, str]:
     return out
 
 
-def project(image_path: Path, th: dict, name: str, caption: str, title: str) -> str:
-    """Half-width block: a notched RULE-framed screenshot over a one-line
-    caption."""
-    t = Text()
-    iw, ih = 428, 225
-    with Image.open(image_path) as im:
-        shot = jpeg_data(im.convert("RGB").resize((iw * 2, ih * 2), Image.LANCZOS))
-    y = 4 + ih + 28
-    body = [clip("shot", 6, 4, iw, ih),
-            f'<g clip-path="url(#shot)">{image(6, 4, iw, ih, shot, "image/jpeg")}</g>',
-            rule_notch(6, 4, iw, ih, th),
-            t(6, y, name, 14, "p w"),
-            t(6 + len(name) * 14 * MONO_ADVANCE + 12, y, caption, 12),
-            t(434, y, "↗", 13, "a", "end")]
-    return svg(W // 2, y + 12, title, body, css(th, t.all))
-
-
 def link_btn(th: dict, label: str, icon: str, title: str, mx: float) -> str:
-    """One outlined link button, drawn at its master x so the slice viewBox can
+    """One tinted link button, drawn at its master x so the slice viewBox can
     cut it out of the intro master's bottom row (button y 264..304)."""
     t = Text()
     w = 550 / 3
@@ -345,8 +315,6 @@ def link_btn(th: dict, label: str, icon: str, title: str, mx: float) -> str:
                    f'<path fill="{th["ACCENT"]}" d="{ICONS[icon]}"/></g>')
     body = [f'<path d="{notch(bx, by, w - 12, 40, 4)}" fill="{th["ACCENT"]}" '
             f'fill-opacity="{th["CHIP"]}"/>',
-            f'<path d="{notch(bx + .5, by + .5, w - 13, 39, 4)}" fill="none" '
-            f'stroke="{th["ACCENT"]}" stroke-opacity="{th["RULE"]}"/>',
             icon_markup,
             t(bx + 33, by + 24.5, label, 12, "p"),
             t(bx + w - 18, by + 24.5, "↗", 12, "a", "end")]
@@ -356,8 +324,10 @@ def link_btn(th: dict, label: str, icon: str, title: str, mx: float) -> str:
 # ---------------------------------------------------------------- pixel city
 
 # The README footer is a harbour skyline painted on a 434x112 grid of 2-unit
-# pixels inside a notched frame at (6, 4). The still layers are baked into two
-# PNGs (sky behind, city in front) so clouds, stars and planes can pass behind
+# pixels at (6, 4), with no frame or sky fill: the page background shows
+# through, and the sides and the water dither away into it. The still layers
+# are baked into two transparent PNGs (sky behind, city in front) so clouds,
+# stars and planes can pass behind
 # the towers; everything that moves is SVG rects animated with CSS, which plays
 # inside an <img> on GitHub.
 CITY_W, CITY_H, CELL, OX, OY = 434, 112, 2, 6, 4
@@ -370,8 +340,8 @@ BAYER_GRID = np.tile(BAYER8, (CITY_H // 8 + 1, CITY_W // 8 + 1))[:CITY_H, :CITY_
 # are window lights at night and sky glints on glass by day.
 CITY = {
     "dark": {
-        "sky": ["#02050B", "#040A15", "#071222", "#0B1C31", "#102841", "#173651", "#1F4360"],
-        "glow": "#2C5878", "moon": "#E9F2F6", "shade": "#AFC4D0", "halo": "#16304A",
+        "bg": "#0D1117", "glow": "#1A3550",
+        "moon": "#E9F2F6", "shade": "#AFC4D0", "halo": "#1C3A57",
         "star": "#D6E8F4", "ridge": "#0B1C2D", "ridge_top": "#123049",
         "far": "#0C1E31", "far_win": "#2A5878", "far_lit": "#8A7A52",
         "mid": "#07111C", "rim": "#16304A", "roof": "#1E3C57", "edge": "#040A12",
@@ -386,8 +356,8 @@ CITY = {
         "bird": "#0B1826",
     },
     "light": {
-        "sky": ["#6FB1DE", "#7DB9E2", "#8EC3E7", "#A2CDEC", "#B8D9F1", "#CDE5F5", "#E2EFF8"],
-        "glow": "#F5EFE3", "moon": "#FFF9E3", "shade": "#FFE9AE", "halo": "#D8ECF8",
+        "bg": "#FFFFFF", "glow": "#DCE9F2",
+        "moon": "#FFE39A", "shade": "#F4C65E", "halo": "#FFF0C8",
         "star": "#FFFFFF", "ridge": "#AEC8D9", "ridge_top": "#BDD3E2",
         "far": "#9CB8CC", "far_win": "#B7CEDD", "far_lit": "#C8DCE8",
         "mid": "#6B889E", "rim": "#93AFC2", "roof": "#A9C2D2", "edge": "#57738A",
@@ -396,9 +366,9 @@ CITY = {
         "lit_p": .34, "flood": "#C3D8E6", "neon": "#0969A8",
         "bridge": "#55718A", "cable": "#7C99AE", "lamp": "#E9F2F7",
         "road": "#41596C", "kerb": "#7C97AA", "water": "#5B8DB0", "ripple": "#86B2CE",
-        "beacon": "#E0453A", "cloud": "#FFFFFF", "cloud_hi": "#DCEAF4",
+        "beacon": "#E0453A", "cloud": "#E6EFF5", "cloud_hi": "#D3E2EC",
         "train": "#EEF4F8", "train_hi": "#FFFFFF", "train_win": "#33536B",
-        "head": "#FFFFFF", "tail": "#E0453A", "glint": "#FFFFFF", "boat": "#EEF4F8",
+        "head": "#FFFFFF", "tail": "#E0453A", "glint": "#86B2CE", "boat": "#EEF4F8",
         "bird": "#2E4A60",
     },
 }
@@ -434,28 +404,20 @@ class Canvas:
         mask[y0:y1, x0:x1] = BAYER_GRID[y0:y1, x0:x1] < density
         self.paint(mask, color)
 
-    def png(self, opaque: bool = False) -> str:
-        img = Image.fromarray(self.px if not opaque else self.px[..., :3],
-                              "RGBA" if not opaque else "RGB")
-        img = img.quantize(255, Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE)
+    def png(self) -> str:
+        img = Image.fromarray(self.px, "RGBA").quantize(
+            255, Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE)
         buffer = io.BytesIO()
         img.save(buffer, "PNG", optimize=True)
         return base64.b64encode(buffer.getvalue()).decode()
 
 
 def city_sky(p: dict, rng: random.Random, night: bool) -> Canvas:
-    """The sky layer: a dithered vertical ramp, a warm haze over the skyline,
-    the moon or sun with its halo, and faint fixed stars at night."""
+    """The sky layer on a transparent ground: sparse dithered haze behind the
+    skyline, the moon or sun with its halo, and faint fixed stars at night."""
     sky = Canvas()
-    ramp = p["sky"]
-    n = len(ramp) - 1
-    for y in range(CITY_H):
-        t = min(y / 90, 1) * n
-        i = min(int(t), n - 1)
-        sky.fill(0, y, CITY_W, y + 1, ramp[i])
-        sky.fill(0, y, CITY_W, y + 1, ramp[i + 1], t - i)
     yy, xx = np.mgrid[0:CITY_H, 0:CITY_W]
-    haze = np.clip((yy - 52) / 38, 0, 1) ** 1.6 * (.25 + .5 * np.exp(-((xx - 280) / 120) ** 2))
+    haze = np.clip((yy - 56) / 34, 0, 1) ** 1.6 * .35 * np.exp(-((xx - 280) / 110) ** 2)
     sky.paint(BAYER_GRID < haze, p["glow"])
 
     mx, my = MOON
@@ -472,8 +434,7 @@ def city_sky(p: dict, rng: random.Random, night: bool) -> Canvas:
         for _ in range(150):
             x, y = rng.randrange(CITY_W), int(rng.random() ** 1.5 * 74)
             if np.hypot(x - mx, y - my) > 18:
-                sky.fill(x, y, x + 1, y + 1, mix(ramp[min(y // 13, n)], p["star"],
-                                                  rng.uniform(.25, .7)))
+                sky.fill(x, y, x + 1, y + 1, mix(p["bg"], p["star"], rng.uniform(.25, .7)))
     else:
         sky.paint(disc & (d > 5.2), p["shade"])
     return sky
@@ -621,7 +582,7 @@ BRIDGE_TOWERS = (22, 100)
 DECK = 79  # rail level on the bridge and the viaduct
 
 
-def city_layer(p: dict, sky: Canvas, rng) -> tuple[Canvas, list, list]:
+def city_layer(p: dict, rng) -> tuple[Canvas, list, list]:
     """The city layer, back to front: hills, a hazy far skyline, the bridge,
     the main skyline, the rail viaduct, waterfront shops, the road and the
     water with its reflection. Returns the canvas, window spots and beacons."""
@@ -664,7 +625,7 @@ def city_layer(p: dict, sky: Canvas, rng) -> tuple[Canvas, list, list]:
         cy = cable(cx)
         cv.fill(cx, min(cy, prev), cx + 1, max(cy, prev) + 1, p["cable"])
         if cx % 4 == 0:
-            cv.fill(cx, cy + 1, cx + 1, DECK, mix(p["cable"], p["sky"][-1], .45))
+            cv.fill(cx, cy + 1, cx + 1, DECK, mix(p["cable"], p["bg"], .45))
         prev = cy
     cv.fill(0, DECK, QUAY + 6, DECK + 1, p["roof"])
     cv.fill(0, DECK + 1, QUAY + 6, DECK + 3, p["bridge"])
@@ -718,24 +679,31 @@ def city_layer(p: dict, sky: Canvas, rng) -> tuple[Canvas, list, list]:
     cv.fill(QUAY, BASE + 3, CITY_W, BASE + 4, p["kerb"])
     cv.fill(QUAY - 1, 84, QUAY + 1, BASE + 4, p["front"])
 
-    # Water: mirror the composited scene about each bank's waterline, darken
-    # it, shift rows for ripples, and let bright lights stretch into streaks.
-    above = np.where(cv.px[..., 3:] > 0, cv.px[..., :3], sky.px[..., :3]).astype(float)
+    # Water: mirror the city about each bank's waterline, tint it, shift rows
+    # for ripples and let bright lights stretch into streaks. There is no water
+    # fill: the reflection thins out with depth into the page background.
+    above = cv.px[..., :3].astype(float)
+    solid = cv.px[..., 3] > 0
     water, ripple = rgb(p["water"]), rgb(p["ripple"])
     lum = above @ np.array([.3, .59, .11])
-    bright = lum > np.percentile(lum, 97)
+    bright = solid & (lum > np.percentile(lum[solid], 94))
     for x in range(CITY_W):
         line = 86 if x < QUAY else BASE + 4
         for y in range(line, CITY_H):
             r = y - line
             sx = min(max(x + int(round(np.sin(r * 1.7 + x * .11) * (.5 + r / 8))), 0), CITY_W - 1)
             sy = max(2 * line - 1 - y, 0)
-            k = max(.34 - r * .012, .12)
             if bright[sy, sx] and r % 2 == 0 and r < 16:
                 k = .6 - r * .02
+            elif solid[sy, sx] and BAYER_GRID[y, x] < .8 - r * .055:
+                k = max(.34 - r * .012, .12)
+            elif r % 3 == 1 and BAYER_GRID[y, x] < .14 - r * .004:
+                cv.px[y, x] = (*ripple.astype(np.uint8), 255)
+                continue
+            else:
+                cv.px[y, x] = 0
+                continue
             c = water * (1 - k) + above[sy, sx] * k
-            if r % 3 == 1 and BAYER_GRID[y, x] < .12:
-                c = ripple
             cv.px[y, x] = (*np.round(c).astype(np.uint8), 255)
     # Moon glade or sun glitter on the river.
     for y in range(86, CITY_H):
@@ -744,6 +712,10 @@ def city_layer(p: dict, sky: Canvas, rng) -> tuple[Canvas, list, list]:
             gx = MOON[0] + int(rng.gauss(0, 2 + r * .3))
             cv.fill(gx, y, gx + rng.randrange(1, 5), y + 1,
                     mix(p["water"], p["moon"], max(.55 - r * .015, .25)))
+    # Dither both ends of the scene away into the page.
+    xs = np.arange(CITY_W)
+    edge = np.minimum(xs, CITY_W - 1 - xs)[None, :] / 18
+    cv.px[BAYER_GRID >= edge] = 0
     return cv, spots, beacons
 
 
@@ -790,7 +762,7 @@ def pixel_wave(theme: str) -> str:
     p = CITY[theme]
     rng = random.Random(7)
     sky = city_sky(p, rng, night)
-    city, spots, beacons = city_layer(p, sky, random.Random(11))
+    city, spots, beacons = city_layer(p, random.Random(11))
     rng = random.Random(23)
 
     # Pick windows that switch on and off; bake them dark underneath.
@@ -802,9 +774,9 @@ def pixel_wave(theme: str) -> str:
         city.fill(wx, wy, wx + ww, wy + wh, p["off"])
 
     fw, fh = CELL * CITY_W, CELL * CITY_H
-    body = [clip("city", OX, OY, fw, fh),
+    body = [f'<clipPath id="city"><rect x="{OX}" y="{OY}" width="{fw}" height="{fh}"/></clipPath>',
             '<g clip-path="url(#city)">',
-            image(OX, OY, fw, fh, sky.png(opaque=True), "image/png")]
+            image(OX, OY, fw, fh, sky.png(), "image/png")]
 
     # Behind the towers: stars, clouds, a plane, a meteor or birds.
     if night:
@@ -889,8 +861,6 @@ def pixel_wave(theme: str) -> str:
         body.append(grid_rect(x, y, rng.randrange(1, 4), 1, p["glint"], ' class="sh"' + anim(
             rng.uniform(0, 6), rng.uniform(3, 6))))
     body.append("</g>")
-    body.append(f'<path d="{notch(OX + .5, OY + .5, fw - 1, fh - 1, 4)}" fill="none" '
-                f'stroke="{THEMES[theme]["ACCENT"]}" stroke-opacity="{THEMES[theme]["RULE"]}"/>')
 
     tr_from, tr_to = -CELL * 300, CELL * (CITY_W - 140) + 40
     style = (
@@ -935,7 +905,7 @@ def pixel_wave(theme: str) -> str:
 
 
 def build(theme: str, portrait: str) -> dict[str, str]:
-    """The eight README images for one theme; the portrait PNG is shared."""
+    """The six README images for one theme; the portrait PNG is shared."""
     th = THEMES[theme]
     lw = 550 / 3
     return {
@@ -945,12 +915,6 @@ def build(theme: str, portrait: str) -> dict[str, str]:
                                330 + lw),
         "link-x": link_btn(th, "@screeendev", "X", "@screeendev on X",
                            330 + 2 * lw),
-        "project-col": project(ASSETS / "website-col.png", th, "Col",
-                               "UI libraries, all in one place",
-                               "Col: UI libraries, components and design tools, all in one place. usecol.com"),
-        "project-emc2": project(ASSETS / "website-emc2.png", th, "Emc²",
-                                "One inbox for every account",
-                                "Emc²: a desktop email client with one inbox for every account"),
         "pixel-wave": pixel_wave(theme),
     }
 
