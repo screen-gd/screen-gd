@@ -5,7 +5,7 @@ its fonts (Geist Mono, Geist Pixel) and bitmaps, so it renders the same everywhe
 
 The design is a quiet profile on a transparent background: a dithered portrait
 tile beside a dither-gradient pixel wordmark, framed project screenshots with
-one-line captions, outlined link buttons and animated pixel waves. Every
+one-line captions, outlined link buttons and an animated pixel city. Every
 image is built twice, dark and light, and the README picks between them with
 <picture> and prefers-color-scheme. The portrait is assets/portrait.png, baked
 by astro-dither through scripts/bake_portrait.py (needs a browser, run manually).
@@ -352,32 +352,61 @@ def link_btn(th: dict, label: str, icon: str, title: str, mx: float) -> str:
     return svg(w, 56, title, body, css(th, t.all), (mx, 264, w, 56))
 
 
-# A decorative footer image keeps animation self-contained in GitHub's README.
+# The README footer is a self-contained animated scene that works as an image.
 def pixel_wave(th: dict) -> str:
-    """Draw three travelling pixel waves; reduced-motion readers see a still wave."""
-    import math
+    """Build a layered pixel city with window lights, traffic and shooting stars."""
+    import random
 
+    rng = random.Random(42)
+    accent = th["ACCENT"]
     body = []
-    for layer in range(3):
-        cells = []
-        for column in range(109):
-            x = 6 + column * 8
-            y = 52 + round((math.sin(column / 11 + layer * 1.7) * 17
-                            + math.sin(column / 23) * 9) / 4) * 4
-            cells.append(rect(x, y, 3, 3, th["ACCENT"]))
-            if column % 3 == layer:
-                cells.append(rect(x, y + 8, 3, 3, th["ACCENT"]))
-        body.append(f'<g class="wave wave-{layer}">{"".join(cells)}</g>')
+    for i in range(42):
+        x, y = rng.randrange(12, 868), rng.randrange(18, 105)
+        body.append(f'<rect class="star" style="animation-delay:-{i % 7}s" '
+                    f'x="{x}" y="{y}" width="2" height="2" fill="{accent}"/>')
+    # A stepped moon keeps the sky in the portrait's pixel vocabulary.
+    body.append(f'<path d="M728 22h24v4h8v8h4v24h-4v8h-8v4h-24v-4h-8v-8h-4V34h4v-8h8z" '
+                f'fill="{accent}" opacity=".65"/>')
+    body.append(f'<path d="M744 22h8v4h8v8h4v24h-4v8h-8v4h-8v-8h8V34h-8z" '
+                f'fill="{accent}" opacity=".45"/>')
+    for layer in range(2):
+        x = 6
+        while x < 874:
+            width = min(rng.randrange(24, 57, 4), 874 - x)
+            height = rng.randrange(28, 85 if layer == 0 else 112, 8)
+            y = 184 - height
+            opacity = ".16" if layer == 0 else ".48"
+            body.append(f'<g fill="{accent}"><rect x="{x}" y="{y}" width="{width}" '
+                        f'height="{height}" opacity="{opacity}"/>')
+            if height > 76:
+                body.append(rect(x + width // 2, y - 12, 2, 12, accent))
+            for wx in range(x + 6, x + width - 4, 8):
+                for wy in range(y + 8, 178, 10):
+                    if rng.random() > .52:
+                        delay = rng.randrange(18)
+                        body.append(f'<rect class="window" style="animation-delay:-{delay}s" '
+                                    f'x="{wx}" y="{wy}" width="3" height="4" opacity=".7"/>')
+            body.append('</g>')
+            x += width + rng.randrange(4, 13, 4)
+    body.append(f'<path d="M6 185h868M6 203h868" stroke="{accent}" opacity=".3"/>')
+    for i in range(3):
+        body.append(f'<g class="traffic" style="animation-delay:-{i * 4}s" fill="{accent}">'
+                    + rect(0, 191, 14, 3, accent) + rect(18, 191, 4, 3, accent) + '</g>')
+    body.append(f'<path class="meteor" d="M0 0h4v4h-4zM-8-8h4v4h-4zM-16-16h4v4h-4z" '
+                f'fill="{accent}"/>')
     style = (
-        ".wave{transform-box:view-box;transform-origin:center;opacity:.35}"
-        ".wave-0{animation:drift 8s ease-in-out infinite}"
-        ".wave-1{opacity:.6;animation:drift 10s ease-in-out -3s infinite reverse}"
-        ".wave-2{opacity:.85;animation:drift 12s ease-in-out -6s infinite}"
-        "@keyframes drift{0%,100%{transform:translateY(-8px)}"
-        "50%{transform:translateY(8px)}}"
-        "@media(prefers-reduced-motion:reduce){.wave{animation:none}}"
+        ".star{animation:twinkle 6s ease-in-out infinite;opacity:.4}"
+        ".window{animation:lights 16s steps(1,end) infinite}"
+        ".traffic{animation:drive 12s linear infinite}"
+        ".meteor{opacity:0;animation:shoot 14s linear infinite}"
+        "@keyframes twinkle{50%{opacity:1}}"
+        "@keyframes lights{0%,70%,100%{opacity:.7}71%,85%{opacity:.08}}"
+        "@keyframes drive{from{transform:translateX(-30px)}to{transform:translateX(900px)}}"
+        "@keyframes shoot{0%,78%{opacity:0;transform:translate(280px,10px)}"
+        "80%{opacity:1}87%{opacity:0;transform:translate(430px,120px)}100%{opacity:0}}"
+        "@media(prefers-reduced-motion:reduce){.star,.window,.traffic,.meteor{animation:none}}"
     )
-    return svg(W, 108, "Animated blue pixel waves", body, style)
+    return svg(W, 220, "Pixel city at night, with twinkling stars and passing traffic", body, style)
 
 
 def build(th: dict, portrait: str) -> dict[str, str]:
